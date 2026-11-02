@@ -164,6 +164,7 @@ def compare_strategies(
     start: int = 100,
     n_sims: int = 2000,
     seed: int = RANDOM_SEED,
+    progress: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     """Roda o backtest de todas as estratégias nos mesmos concursos.
 
@@ -176,7 +177,7 @@ def compare_strategies(
     null_means = null_mean_hits(draws[start:], n_sims, seed)
 
     summaries, hits_frames = [], []
-    for name, strategy in tqdm(strategies.items(), desc="estratégias"):
+    for name, strategy in tqdm(strategies.items(), desc="estratégias", disable=not progress):
         hits = run_backtest(draws, strategy, start, seed)
         summaries.append(summarize(hits, null_means, name))
         hits_frames.append(

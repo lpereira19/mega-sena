@@ -16,6 +16,9 @@ dados com rigor estatístico:
 4. **Experimentação**: backtest walk-forward que mostra que estratégias de "números quentes"
    ou "números atrasados" performam igual a um gerador pseudoaleatório.
 
+> 📓 **Análise completa, passo a passo:**
+> [`notebooks/1.0-lsp-analise-mega-sena.ipynb`](notebooks/1.0-lsp-analise-mega-sena.ipynb)
+
 ## Principais resultados
 
 > Os números abaixo vêm de `reports/hypothesis_tests.csv` e `models/backtest_summary.csv`.
@@ -179,6 +182,7 @@ semente fixa (`RANDOM_SEED` em [`config.py`](mega_sena/config.py)) e são reprod
 │   ├── raw            <- JSONs da API (append-only, fora do git)
 │   └── processed      <- megasena.csv e features.csv (fora do git)
 ├── models             <- Resultados do backtest (resumo, acertos, distribuição nula)
+├── notebooks          <- Notebook com a análise completa, já executado
 ├── reports
 │   ├── figures        <- Figuras da EDA e do backtest
 │   └── hypothesis_tests.csv
