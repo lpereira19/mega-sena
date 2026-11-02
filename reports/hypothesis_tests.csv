@@ -1,0 +1,8 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 60 dezenas,89.09595959595958,59,0.00689265158104487,corrigido 54/59
+Frequência das 60 dezenas (Monte Carlo),81.54545454545453,59,0.00849575212393803,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,8.58715428857468,6,0.19816176733707885,7 categorias
+Total de dezenas por quadrante,5.024506974506974,3,0.17001139376885807,corrigido 54/59
+"Frequência das 60 dezenas, 1996-2005",65.05823754789272,59,0.2740537292262776,pós-hoc; 725 concursos
+"Frequência das 60 dezenas, 2006-2015",68.5731922398589,59,0.18451019329427798,pós-hoc; 1050 concursos
+"Frequência das 60 dezenas, 2016-2026",102.30183056619836,59,0.0004054554232210445,pós-hoc; 1305 concursos

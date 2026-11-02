@@ -27,8 +27,11 @@ dependencies = [
     "pip",
     "pytest",
     "python-dotenv",
+    "requests>=2.34.2",
     "ruff",
     "scikit-learn",
+    "scipy>=1.18.1",
+    "seaborn>=0.13.2",
     "tqdm",
     "typer",
 ]

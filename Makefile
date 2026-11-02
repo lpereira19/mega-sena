@@ -62,10 +62,34 @@ create_environment:
 #################################################################################
 
 
-## Make dataset
+## Download incremental + ETL dos resultados (data/raw -> data/processed)
 .PHONY: data
-data: requirements
-	$(PYTHON_INTERPRETER) mega_sena/dataset.py
+data:
+	$(PYTHON_INTERPRETER) -m mega_sena.dataset
+
+## Features por concurso (pares, quadrantes, soma...)
+.PHONY: features
+features:
+	$(PYTHON_INTERPRETER) -m mega_sena.features
+
+## Testes de hipótese (qui-quadrado + Monte Carlo)
+.PHONY: hypothesis
+hypothesis:
+	$(PYTHON_INTERPRETER) -m mega_sena.hypothesis
+
+## Backtest walk-forward das estratégias
+.PHONY: backtest
+backtest:
+	$(PYTHON_INTERPRETER) -m mega_sena.modeling.backtest
+
+## Figuras da EDA e do backtest (reports/figures)
+.PHONY: figures
+figures:
+	$(PYTHON_INTERPRETER) -m mega_sena.plots
+
+## Pipeline completo
+.PHONY: all
+all: data features hypothesis backtest figures
 
 
 #################################################################################
