@@ -44,6 +44,12 @@ app = typer.Typer()
 
 FPC = (TOTAL_NUMBERS - NUMBERS_PER_DRAW) / (TOTAL_NUMBERS - 1)  # 54/59
 
+# Nomes dos testes na tabela de resultados (também usados por mega_sena.report)
+FREQUENCY_TEST = "Frequência das 60 dezenas"
+FREQUENCY_MC_TEST = "Frequência das 60 dezenas (Monte Carlo)"
+EVEN_ODD_TEST = "Pares por concurso vs. hipergeométrica"
+QUADRANT_TEST = "Total de dezenas por quadrante"
+
 
 @dataclass(frozen=True)
 class TestResult:
@@ -159,7 +165,7 @@ def monte_carlo_frequency_test(
     )
     p_value = (1 + (simulated >= observed).sum()) / (n_sims + 1)
     return TestResult(
-        "Frequência das 60 dezenas (Monte Carlo)",
+        FREQUENCY_MC_TEST,
         observed,
         TOTAL_NUMBERS - 1,
         p_value,
@@ -169,22 +175,24 @@ def monte_carlo_frequency_test(
 
 #: Janelas da análise por período. Foram escolhidas DEPOIS de ver o teste global rejeitar H0,
 #: por isso os p-valores por período são exploratórios (pós-hoc), não confirmatórios.
-PERIODS = [(1996, 2005), (2006, 2015), (2016, 2026)]
+#: ``None`` no fim de uma janela significa "até o ano mais recente dos dados".
+PERIODS: list[tuple[int, int | None]] = [(1996, 2005), (2006, 2015), (2016, None)]
 
 
 def frequency_tests_by_period(
-    df: pd.DataFrame, periods: list[tuple[int, int]] = PERIODS
+    df: pd.DataFrame, periods: list[tuple[int, int | None]] = PERIODS
 ) -> list[TestResult]:
     """Teste de frequência das 60 dezenas restrito a cada intervalo de anos (inclusivo)."""
     results = []
     for first, last in periods:
+        last = last or int(df["data"].dt.year.max())
         subset = draws_matrix(df[df["data"].dt.year.between(first, last)])
         counts = np.bincount(subset.ravel(), minlength=TOTAL_NUMBERS + 1)[1:]
         result = category_totals_test(
             counts,
             np.ones(TOTAL_NUMBERS),
             len(subset),
-            f"Frequência das 60 dezenas, {first}-{last}",
+            f"{FREQUENCY_TEST}, {first}-{last}",
         )
         results.append(
             TestResult(**{**asdict(result), "observacao": f"pós-hoc; {len(subset)} concursos"})
@@ -209,16 +217,14 @@ def run_all_tests(df: pd.DataFrame, n_sims: int = 2000, seed: int = RANDOM_SEED)
     evens_k = np.bincount(features["pares"], minlength=NUMBERS_PER_DRAW + 1)
 
     results = [
-        category_totals_test(
-            counts, np.ones(TOTAL_NUMBERS), n_contests, "Frequência das 60 dezenas"
-        ),
+        category_totals_test(counts, np.ones(TOTAL_NUMBERS), n_contests, FREQUENCY_TEST),
         monte_carlo_frequency_test(draws, n_sims, seed),
-        distribution_test(evens_k, TOTAL_NUMBERS // 2, "Pares por concurso vs. hipergeométrica"),
+        distribution_test(evens_k, TOTAL_NUMBERS // 2, EVEN_ODD_TEST),
         category_totals_test(
             quadrant_totals,
             np.full(N_QUADRANTS, TOTAL_NUMBERS // N_QUADRANTS),
             n_contests,
-            "Total de dezenas por quadrante",
+            QUADRANT_TEST,
         ),
         *frequency_tests_by_period(df),
     ]

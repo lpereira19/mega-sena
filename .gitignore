@@ -189,3 +189,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# Arquivos pessoais (fora do repositório público)
+post_linkedin.md
+CLAUDE.md

@@ -87,9 +87,10 @@ backtest:
 figures:
 	$(PYTHON_INTERPRETER) -m mega_sena.plots
 
-## Pipeline completo
+## Pipeline completo: dados, análises, figuras, README e notebook
 .PHONY: all
-all: data features hypothesis backtest figures
+all:
+	$(PYTHON_INTERPRETER) -m mega_sena.pipeline
 
 
 #################################################################################

@@ -21,61 +21,56 @@ dados com rigor estatístico:
 
 ## Principais resultados
 
-> Os números abaixo vêm de `reports/hypothesis_tests.csv` e `models/backtest_summary.csv`.
-> Rode `make all` para regenerar com os concursos mais recentes.
+> Esta seção é gerada automaticamente a partir dos resultados (`python -m mega_sena.pipeline`).
 
-Histórico analisado: **3.080 concursos** (11/03/1996 a 01/11/2026).
+<!-- RESULTADOS:INICIO (gerado por mega_sena.report; não edite à mão) -->
+
+Histórico analisado: **3.080 concursos**, de 11/03/1996 a 01/11/2026 (último concurso: 3080).
 
 | Pergunta | Resultado | p-valor |
 |---|---|---|
-| As 60 dezenas saem com a mesma frequência? | **Não, em parte do histórico** | 0,007 (qui-quadrado corrigido); 0,008 (Monte Carlo) |
-| A proporção de pares segue a teoria? | Sim | 0,20 |
-| Os quadrantes recebem 25% cada? | Sim | 0,17 |
-| Apostar nas "quentes" vence o acaso? | Não | 0,70 |
-| Alguma das 4 estratégias vence o acaso? | Não, após corrigir para múltiplas comparações | ≥ 0,12 (Bonferroni) |
+| As 60 dezenas saem com a mesma frequência? | **Não** | 0,007 (qui-quadrado corrigido); 0,008 (Monte Carlo) |
+| A proporção de pares segue a teoria? | Sim | 0,198 |
+| Os quadrantes recebem 25% cada? | Sim | 0,170 |
+| Apostar nas "quentes" vence o acaso? | Não | 0,704 |
+| Alguma das 4 estratégias vence o acaso (com Bonferroni)? | Não | menor p: 0,122 |
 
 ![Frequência de cada dezena](reports/figures/frequencia_dezenas.png)
 
-**A frequência das dezenas não é perfeitamente uniforme.** O teste global rejeita H0 a 1%, e o
-teste de Monte Carlo, que não depende de aproximações, confirma. A dezena 10 saiu 360 vezes e a
-26 saiu 250, contra 308 esperadas. Os dados foram checados e não há concursos duplicados,
-lacunas nem combinações repetidas.
-
-A quebra por período mostra que o desvio se concentra na última década:
+**A frequência das dezenas não é perfeitamente uniforme.** O teste global rejeita H0 (p = 0,007), e o teste de Monte Carlo, que não depende de aproximações, confirma (p = 0,008). A dezena 10 saiu 360 vezes e a 26 saiu 250, contra 308 esperadas.
 
 | Período | Concursos | p-valor |
 |---|---|---|
-| 1996–2005 | 725 | 0,27 |
-| 2006–2015 | 1.050 | 0,18 |
-| 2016–2026 | 1.305 | 0,0004 |
+| 1996–2005 | 725 | 0,274 |
+| 2006–2015 | 1.050 | 0,185 |
+| 2016–2026 | 1.305 | < 0,001 |
 
-Essa quebra é **exploratória**: as janelas foram escolhidas depois de ver o teste global
-rejeitar. Ela sugere hipóteses (mudança de equipamento ou de procedimento, viés físico das
-bolas) mas não as confirma. Com os dados disponíveis, não dá para separar um viés físico real
-de um evento raro do acaso (cerca de 1 em 150).
+Essa quebra é **exploratória**: as janelas foram escolhidas depois de ver o teste global, então os p-valores por período não são confirmatórios. O desvio se concentra em 2016–2026 (p < 0,001). Isso sugere hipóteses, como mudança de equipamento ou viés físico das bolas, mas não as confirma: com os dados disponíveis, não dá para separar um viés real de um evento raro do acaso.
 
 ![Desvio acumulado](reports/figures/frequencia_acumulada.png)
 
-O desvio acumulado mostra como as dezenas 10 e 53 se afastaram do esperado ao longo do tempo, e
-as 21, 26 e 55 no sentido oposto. O envelope cinza vale para uma dezena isolada: com 60 dezenas,
-é normal que algumas o ultrapassem.
+O desvio acumulado mostra como cada dezena se afasta do esperado ao longo do tempo, com destaque para as 3 mais e as 3 menos sorteadas. O envelope cinza vale para uma dezena isolada: com 60 dezenas, é normal que algumas o ultrapassem.
 
 ![Pares e ímpares](reports/figures/pares_impares.png)
 ![Quadrantes](reports/figures/quadrantes.png)
 
-Pares e ímpares e a distribuição pelos quadrantes seguem a hipergeométrica prevista pela teoria.
+A composição de pares e ímpares segue a hipergeométrica prevista pela teoria (p = 0,198), e os quadrantes recebem 25% das dezenas cada (p = 0,170).
 
 ![Backtest](reports/figures/backtest.png)
 
-**Mesmo com frequências desiguais, nenhuma estratégia se distingue do acaso.** "Quentes
-(histórico)" acerta 0,605 por concurso contra 0,600 esperado (p = 0,70). As apostas nas quentes
-dos últimos 50 concursos (0,627) e nas frias (0,572) têm p ≈ 0,03 isoladamente. Mas foram
-testadas 4 estratégias; com a correção de Bonferroni, os p-valores sobem para 0,13 e 0,12. Além
-disso, a diferença é de poucos centésimos de acerto por concurso, e nenhuma estratégia acertou
-uma quina ou uma sena em 2.980 apostas.
+| Estratégia | Acertos por concurso | p (Monte Carlo) | p (Bonferroni) |
+|---|---|---|---|
+| *esperado ao acaso* | *0,600* | | |
+| quentes (histórico) | 0,605 | 0,704 | 1,000 |
+| quentes (últimos 50) | 0,627 | 0,033 | 0,134 |
+| frias (histórico) | 0,572 | 0,030 | 0,122 |
+| aleatória | 0,592 | 0,532 | 1,000 |
 
-A lição para o portfólio: um teste estatisticamente significativo não implica um efeito
-explorável. O tamanho do efeito importa tanto quanto o p-valor.
+**Nenhuma estratégia se distingue do acaso** depois da correção para múltiplas comparações. "quentes (últimos 50)" e "frias (histórico)" parecem promissoras isoladamente (p < 0,05), mas foram testadas 4 estratégias: alguma sempre pode parecer boa por sorte, e com Bonferroni a vantagem some. Nenhuma estratégia acertou sequer uma quina em 2.980 apostas.
+
+A lição: um teste estatisticamente significativo não implica um efeito explorável. O tamanho do efeito importa tanto quanto o p-valor.
+
+<!-- RESULTADOS:FIM -->
 
 ## Metodologia
 
@@ -163,16 +158,21 @@ Requer Python 3.12 e [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync                                   # cria o .venv e instala as dependências
 
+# Atualização completa com os concursos mais recentes (dados, análises, figuras, README e notebook)
+uv run python -m mega_sena.pipeline
+
+# Ou cada etapa separadamente:
 uv run python -m mega_sena.dataset        # ETL (download incremental)
 uv run python -m mega_sena.features       # features por concurso
 uv run python -m mega_sena.hypothesis     # testes de hipótese
 uv run python -m mega_sena.modeling.backtest
 uv run python -m mega_sena.plots          # figuras em reports/figures
+uv run python -m mega_sena.report         # seção de resultados do README
 
 uv run pytest                             # testes
 ```
 
-Com `make` disponível (Linux/macOS/WSL), `make all` roda o pipeline inteiro. Todos os passos usam
+Com `make` disponível (Linux/macOS/WSL), `make all` faz o mesmo que o pipeline. Todos os passos usam
 semente fixa (`RANDOM_SEED` em [`config.py`](mega_sena/config.py)) e são reprodutíveis.
 
 ## Organização
@@ -193,6 +193,8 @@ semente fixa (`RANDOM_SEED` em [`config.py`](mega_sena/config.py)) e são reprod
     ├── features.py    <- Paridade, quadrantes, frequências
     ├── hypothesis.py  <- Testes qui-quadrado (com correção) e Monte Carlo
     ├── plots.py       <- Visualizações
+    ├── report.py      <- Textos de resultados gerados a partir dos números (README e notebook)
+    ├── pipeline.py    <- Atualização completa em um comando
     └── modeling
         └── backtest.py <- Estratégias e backtest walk-forward
 ```
