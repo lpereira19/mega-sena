@@ -124,6 +124,24 @@ def category_totals_test(
     return TestResult(name, statistic, dof, stats.chi2.sf(statistic, dof), "corrigido 54/59")
 
 
+def pmf_test(
+    observed: np.ndarray, pmf: np.ndarray, name: str, min_expected: float = 5.0
+) -> TestResult:
+    """Qui-quadrado de aderência de contagens observadas a uma distribuição teórica.
+
+    Args:
+        observed: ``observed[i]`` = número de concursos na categoria ``i``.
+        pmf: Probabilidade teórica de cada categoria (mesmo tamanho de ``observed``, soma 1).
+        name: Nome do teste, para o relatório.
+        min_expected: Frequência esperada mínima por categoria; as raras são agrupadas.
+    """
+    observed = np.asarray(observed, dtype=float)
+    expected = observed.sum() * np.asarray(pmf)
+    obs, exp = _merge_sparse_bins(observed, expected, min_expected)
+    statistic, p_value = stats.chisquare(obs, exp)
+    return TestResult(name, statistic, len(obs) - 1, p_value, f"{len(obs)} categorias")
+
+
 def distribution_test(
     observed_k: np.ndarray, successes: int, name: str, min_expected: float = 5.0
 ) -> TestResult:
@@ -135,11 +153,7 @@ def distribution_test(
         name: Nome do teste, para o relatório.
         min_expected: Frequência esperada mínima por categoria; as raras são agrupadas.
     """
-    observed_k = np.asarray(observed_k, dtype=float)
-    expected_k = observed_k.sum() * hypergeom_pmf(successes)
-    obs, exp = _merge_sparse_bins(observed_k, expected_k, min_expected)
-    statistic, p_value = stats.chisquare(obs, exp)
-    return TestResult(name, statistic, len(obs) - 1, p_value, f"{len(obs)} categorias")
+    return pmf_test(observed_k, hypergeom_pmf(successes), name, min_expected)
 
 
 def frequency_statistic(draws: np.ndarray) -> float:

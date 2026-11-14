@@ -5,10 +5,11 @@ Roda em sequência:
 1. ETL: baixa da API os concursos que ainda não estão em ``data/raw`` e regera o CSV processado
 2. Features por concurso
 3. Testes de hipótese
-4. Backtest das estratégias
-5. Figuras em ``reports/figures``
-6. Seção de resultados do README
-7. Reexecução do notebook, para as saídas salvas refletirem os novos dados
+4. Testes de distância entre as dezenas
+5. Backtest das estratégias
+6. Figuras em ``reports/figures``
+7. Seção de resultados do README
+8. Reexecução do notebook, para as saídas salvas refletirem os novos dados
 
 Uso::
 
@@ -24,7 +25,7 @@ import nbformat
 import pandas as pd
 import typer
 
-from mega_sena import dataset, features, hypothesis, plots, report
+from mega_sena import dataset, distances, features, hypothesis, plots, report
 from mega_sena.config import PROCESSED_RESULTS_FILE, PROJ_ROOT, RANDOM_SEED
 from mega_sena.modeling import backtest
 
@@ -82,6 +83,12 @@ def main(
         n_sims=n_sims,
         seed=seed,
     )
+    distances.main(
+        input_path=PROCESSED_RESULTS_FILE,
+        output_path=distances.DISTANCE_TESTS_FILE,
+        n_sims=n_sims,
+        seed=seed,
+    )
     backtest.main(
         input_path=PROCESSED_RESULTS_FILE,
         summary_path=backtest.BACKTEST_SUMMARY_FILE,
@@ -96,6 +103,7 @@ def main(
         input_path=PROCESSED_RESULTS_FILE,
         tests_path=report.HYPOTHESIS_TESTS_FILE,
         summary_path=report.BACKTEST_SUMMARY_FILE,
+        distance_path=report.DISTANCE_TESTS_FILE,
         readme_path=report.README_FILE,
     )
     if run_notebook:

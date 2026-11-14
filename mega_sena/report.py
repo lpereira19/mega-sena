@@ -17,8 +17,10 @@ from loguru import logger
 import pandas as pd
 import typer
 
+from mega_sena import distances
 from mega_sena.config import (
     BACKTEST_SUMMARY_FILE,
+    DISTANCE_TESTS_FILE,
     HYPOTHESIS_TESTS_FILE,
     NUMBERS_PER_DRAW,
     PROCESSED_RESULTS_FILE,
@@ -275,7 +277,71 @@ def summary_table(tests: pd.DataFrame, summary: pd.DataFrame) -> str:
     )
 
 
-def render_results(df: pd.DataFrame, tests: pd.DataFrame, summary: pd.DataFrame) -> str:
+def distance_reading(df: pd.DataFrame, distance_tests: pd.DataFrame) -> str:
+    """Leitura da análise de distância entre as dezenas de um mesmo concurso."""
+    draws = draws_matrix(df)
+    n = len(draws)
+    with_pair = (distances.consecutive_pairs(draws) > 0).mean()
+    expected_pair = 1 - distances.consecutive_pairs_pmf()[0]
+    runs = distances.longest_run(draws)
+    run_pmf = distances.longest_run_pmf()
+    smallest = distances.min_gap(draws).mean()
+    min_pmf = distances.min_gap_pmf()
+    expected_smallest = float((min_pmf * min_pmf.index).sum())
+
+    facts = (
+        f"- **{fmt_num(with_pair * 100, 1)}%** dos concursos tiveram ao menos um par de dezenas "
+        f"consecutivas (como 22 e 23), contra {fmt_num(expected_pair * 100, 1)}% esperados.\n"
+        f"- **{fmt_int(int((runs >= 3).sum()))}** concursos tiveram 3 ou mais dezenas seguidas "
+        f"(esperado: {fmt_num(run_pmf.loc[3:].sum() * n, 0)}), e "
+        f"**{fmt_int(int((runs >= 4).sum()))}** tiveram 4 ou mais "
+        f"(esperado: {fmt_num(run_pmf.loc[4:].sum() * n, 1)}).\n"
+        f"- A menor distância entre duas dezenas de um concurso é, em média, "
+        f"**{fmt_num(smallest, 2)}**, contra {fmt_num(expected_smallest, 2)} esperada."
+    )
+
+    lines = ["| Teste | p-valor | p (Bonferroni) |", "|---|---|---|"]
+    lines += [
+        f"| {row.teste} | {fmt_p(row.p_valor)} | {fmt_p(row.p_valor_bonferroni)} |"
+        for row in distance_tests.itertuples()
+    ]
+
+    significant = distance_tests[distance_tests["p_valor_bonferroni"] < ALPHA]
+    nominal = distance_tests[
+        (distance_tests["p_valor"] < ALPHA) & (distance_tests["p_valor_bonferroni"] >= ALPHA)
+    ]
+    if significant.empty:
+        verdict = "**Nenhuma medida de distância foge do acaso** depois da correção para múltiplas comparações."
+        if not nominal.empty:
+            names = _join([f'"{name}"' for name in nominal["teste"]])
+            verdict += (
+                f" {names} tem p < 0,05 isoladamente, mas foram feitos {len(distance_tests)} "
+                "testes, e com Bonferroni o resultado deixa de ser significativo."
+            )
+    else:
+        names = _join([f'"{name}"' for name in significant["teste"]])
+        verdict = (
+            f"**{names} foge do esperado mesmo após a correção de Bonferroni.** Vale investigar "
+            "o tamanho do efeito antes de qualquer conclusão."
+        )
+
+    nearest = distances.nearest_by_number(draws)
+    outliers = nearest.index[nearest["z"].abs() > 2].tolist()
+    if outliers:
+        verdict += (
+            f" No gráfico por dezena, {_join([f'{x:02d}' for x in outliers])} "
+            f"{'ficam' if len(outliers) > 1 else 'fica'} fora da faixa de 95%; com 60 dezenas, "
+            "espera-se que cerca de 3 fiquem fora por puro acaso."
+        )
+    return f"{facts}\n\n" + "\n".join(lines) + f"\n\n{verdict}"
+
+
+def render_results(
+    df: pd.DataFrame,
+    tests: pd.DataFrame,
+    summary: pd.DataFrame,
+    distance_tests: pd.DataFrame,
+) -> str:
     """Monta a seção de resultados do README (sem os marcadores)."""
     first, last = df.iloc[0], df.iloc[-1]
     return f"""\
@@ -300,6 +366,23 @@ com 60 dezenas, é normal que algumas o ultrapassem.
 ![Quadrantes](reports/figures/quadrantes.png)
 
 {structure_reading(tests)}
+
+### Distância entre as dezenas
+
+Quão próximas saem as dezenas de um mesmo concurso? Números "colados", sequências e a dezena \
+mais próxima de cada uma, comparados com as distribuições exatas de um sorteio aleatório.
+
+![Distâncias](reports/figures/distancias.png)
+
+{distance_reading(df, distance_tests)}
+
+![Vizinhança](reports/figures/vizinhanca.png)
+
+À esquerda, distâncias curtas são mais comuns só porque existem mais pares assim no volante \
+(há 59 pares a distância 1 e só 1 par a distância 59). À direita, as dezenas das pontas (01 e \
+60) têm a vizinha mais longe porque só têm vizinhas de um lado.
+
+### Backtest
 
 ![Backtest](reports/figures/backtest.png)
 
@@ -328,11 +411,15 @@ def main(
     input_path: Path = PROCESSED_RESULTS_FILE,
     tests_path: Path = HYPOTHESIS_TESTS_FILE,
     summary_path: Path = BACKTEST_SUMMARY_FILE,
+    distance_path: Path = DISTANCE_TESTS_FILE,
     readme_path: Path = README_FILE,
 ):
     """Reescreve a seção de resultados do README a partir dos arquivos de resultados."""
     text = render_results(
-        load_processed(input_path), pd.read_csv(tests_path), pd.read_csv(summary_path)
+        load_processed(input_path),
+        pd.read_csv(tests_path),
+        pd.read_csv(summary_path),
+        pd.read_csv(distance_path),
     )
     update_readme(text, readme_path)
     logger.success(f"Seção de resultados do README atualizada ({readme_path}).")

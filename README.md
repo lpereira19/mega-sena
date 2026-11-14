@@ -56,6 +56,33 @@ O desvio acumulado mostra como cada dezena se afasta do esperado ao longo do tem
 
 A composição de pares e ímpares segue a hipergeométrica prevista pela teoria (p = 0,186), e os quadrantes recebem 25% das dezenas cada (p = 0,180).
 
+### Distância entre as dezenas
+
+Quão próximas saem as dezenas de um mesmo concurso? Números "colados", sequências e a dezena mais próxima de cada uma, comparados com as distribuições exatas de um sorteio aleatório.
+
+![Distâncias](reports/figures/distancias.png)
+
+- **42,0%** dos concursos tiveram ao menos um par de dezenas consecutivas (como 22 e 23), contra 42,1% esperados.
+- **97** concursos tiveram 3 ou mais dezenas seguidas (esperado: 99), e **5** tiveram 4 ou mais (esperado: 5,2).
+- A menor distância entre duas dezenas de um concurso é, em média, **2,18**, contra 2,18 esperada.
+
+| Teste | p-valor | p (Bonferroni) |
+|---|---|---|
+| Pares consecutivos por concurso | 0,207 | 1,000 |
+| Maior sequência de consecutivas por concurso | 0,997 | 1,000 |
+| Menor distância por concurso | 0,827 | 1,000 |
+| Saltos entre dezenas vizinhas (Monte Carlo) | 0,801 | 1,000 |
+| Distância entre todos os pares (Monte Carlo) | 0,345 | 1,000 |
+| Vizinha mais próxima de cada dezena (Monte Carlo) | 0,040 | 0,243 |
+
+**Nenhuma medida de distância foge do acaso** depois da correção para múltiplas comparações. "Vizinha mais próxima de cada dezena (Monte Carlo)" tem p < 0,05 isoladamente, mas foram feitos 6 testes, e com Bonferroni o resultado deixa de ser significativo. No gráfico por dezena, 24, 27, 40 e 51 ficam fora da faixa de 95%; com 60 dezenas, espera-se que cerca de 3 fiquem fora por puro acaso.
+
+![Vizinhança](reports/figures/vizinhanca.png)
+
+À esquerda, distâncias curtas são mais comuns só porque existem mais pares assim no volante (há 59 pares a distância 1 e só 1 par a distância 59). À direita, as dezenas das pontas (01 e 60) têm a vizinha mais longe porque só têm vizinhas de um lado.
+
+### Backtest
+
 ![Backtest](reports/figures/backtest.png)
 
 | Estratégia | Acertos por concurso | p (Monte Carlo) | p (Bonferroni) |
@@ -126,7 +153,26 @@ dividida por esse fator. O teste [`test_corrected_chi2_is_calibrated_under_h0`](
 simula 400 históricos sob H0 e confirma que o teste corrigido rejeita cerca de 5% das vezes a
 5% de significância.
 
-### 4. Backtest ([`mega_sena/modeling/backtest.py`](mega_sena/modeling/backtest.py))
+### 4. Distância entre as dezenas ([`mega_sena/distances.py`](mega_sena/distances.py))
+
+Mede quão próximas saem as dezenas de um mesmo concurso e compara com as distribuições
+**exatas** de um sorteio uniforme, deduzidas por contagem de combinações (N = 60, K = 6):
+
+| Medida | Distribuição sob H0 |
+|---|---|
+| Pares consecutivos por concurso | P(j) = C(K−1, j) · C(N−K+1, K−j) / C(N, K) |
+| Maior sequência de consecutivas | programação dinâmica sobre o volante |
+| Menor distância no concurso | P(menor ≥ g) = C(N − (g−1)(K−1), K) / C(N, K) |
+| Salto entre dezenas vizinhas | P(g) = C(N − g, K − 1) / C(N, K) |
+| Distância entre dois números quaisquer | P(d) = (N − d) / C(N, 2) |
+| Vizinha mais próxima da dezena x | P(≥ d) = C(59 − m(d), 5) / C(59, 5), m(d) = dezenas a menos de d de x |
+
+Cada fórmula é conferida contra 200 mil sorteios simulados nos testes automatizados. Medidas
+com uma observação por concurso usam qui-quadrado; as que têm várias observações correlacionadas
+por concurso (os 5 saltos, os 15 pares, as 6 vizinhas) usam p-valor de Monte Carlo. Como são 6
+testes, os p-valores também são corrigidos por Bonferroni.
+
+### 5. Backtest ([`mega_sena/modeling/backtest.py`](mega_sena/modeling/backtest.py))
 
 Desenho **walk-forward**: para cada concurso *t*, cada estratégia aposta 6 dezenas olhando
 **apenas** os concursos anteriores a *t*. Um teste garante que não há vazamento do futuro.
@@ -192,6 +238,7 @@ semente fixa (`RANDOM_SEED` em [`config.py`](mega_sena/config.py)) e são reprod
     ├── dataset.py     <- ETL
     ├── features.py    <- Paridade, quadrantes, frequências
     ├── hypothesis.py  <- Testes qui-quadrado (com correção) e Monte Carlo
+    ├── distances.py   <- Distância entre as dezenas: consecutivas, sequências, vizinhas
     ├── plots.py       <- Visualizações
     ├── report.py      <- Textos de resultados gerados a partir dos números (README e notebook)
     ├── pipeline.py    <- Atualização completa em um comando
