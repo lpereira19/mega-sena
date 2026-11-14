@@ -25,25 +25,25 @@ dados com rigor estatístico:
 
 <!-- RESULTADOS:INICIO (gerado por mega_sena.report; não edite à mão) -->
 
-Histórico analisado: **3.080 concursos**, de 11/03/1996 a 01/11/2026 (último concurso: 3080).
+Histórico analisado: **3.085 concursos**, de 11/03/1996 a 12/11/2026 (último concurso: 3085).
 
 | Pergunta | Resultado | p-valor |
 |---|---|---|
-| As 60 dezenas saem com a mesma frequência? | **Não** | 0,007 (qui-quadrado corrigido); 0,008 (Monte Carlo) |
-| A proporção de pares segue a teoria? | Sim | 0,198 |
-| Os quadrantes recebem 25% cada? | Sim | 0,170 |
-| Apostar nas "quentes" vence o acaso? | Não | 0,704 |
-| Alguma das 4 estratégias vence o acaso (com Bonferroni)? | Não | menor p: 0,122 |
+| As 60 dezenas saem com a mesma frequência? | **Não** | 0,005 (qui-quadrado corrigido); 0,007 (Monte Carlo) |
+| A proporção de pares segue a teoria? | Sim | 0,186 |
+| Os quadrantes recebem 25% cada? | Sim | 0,180 |
+| Apostar nas "quentes" vence o acaso? | Não | 0,604 |
+| Alguma das 4 estratégias vence o acaso (com Bonferroni)? | Não | menor p: 0,116 |
 
 ![Frequência de cada dezena](reports/figures/frequencia_dezenas.png)
 
-**A frequência das dezenas não é perfeitamente uniforme.** O teste global rejeita H0 (p = 0,007), e o teste de Monte Carlo, que não depende de aproximações, confirma (p = 0,008). A dezena 10 saiu 360 vezes e a 26 saiu 250, contra 308 esperadas.
+**A frequência das dezenas não é perfeitamente uniforme.** O teste global rejeita H0 (p = 0,005), e o teste de Monte Carlo, que não depende de aproximações, confirma (p = 0,007). A dezena 10 saiu 362 vezes e a 26 saiu 250, contra 308 esperadas.
 
 | Período | Concursos | p-valor |
 |---|---|---|
 | 1996–2005 | 725 | 0,274 |
 | 2006–2015 | 1.050 | 0,185 |
-| 2016–2026 | 1.305 | < 0,001 |
+| 2016–2026 | 1.310 | < 0,001 |
 
 Essa quebra é **exploratória**: as janelas foram escolhidas depois de ver o teste global, então os p-valores por período não são confirmatórios. O desvio se concentra em 2016–2026 (p < 0,001). Isso sugere hipóteses, como mudança de equipamento ou viés físico das bolas, mas não as confirma: com os dados disponíveis, não dá para separar um viés real de um evento raro do acaso.
 
@@ -54,19 +54,19 @@ O desvio acumulado mostra como cada dezena se afasta do esperado ao longo do tem
 ![Pares e ímpares](reports/figures/pares_impares.png)
 ![Quadrantes](reports/figures/quadrantes.png)
 
-A composição de pares e ímpares segue a hipergeométrica prevista pela teoria (p = 0,198), e os quadrantes recebem 25% das dezenas cada (p = 0,170).
+A composição de pares e ímpares segue a hipergeométrica prevista pela teoria (p = 0,186), e os quadrantes recebem 25% das dezenas cada (p = 0,180).
 
 ![Backtest](reports/figures/backtest.png)
 
 | Estratégia | Acertos por concurso | p (Monte Carlo) | p (Bonferroni) |
 |---|---|---|---|
 | *esperado ao acaso* | *0,600* | | |
-| quentes (histórico) | 0,605 | 0,704 | 1,000 |
-| quentes (últimos 50) | 0,627 | 0,033 | 0,134 |
-| frias (histórico) | 0,572 | 0,030 | 0,122 |
-| aleatória | 0,592 | 0,532 | 1,000 |
+| quentes (histórico) | 0,607 | 0,604 | 1,000 |
+| quentes (últimos 50) | 0,627 | 0,034 | 0,136 |
+| frias (histórico) | 0,572 | 0,029 | 0,116 |
+| aleatória | 0,592 | 0,533 | 1,000 |
 
-**Nenhuma estratégia se distingue do acaso** depois da correção para múltiplas comparações. "quentes (últimos 50)" e "frias (histórico)" parecem promissoras isoladamente (p < 0,05), mas foram testadas 4 estratégias: alguma sempre pode parecer boa por sorte, e com Bonferroni a vantagem some. Nenhuma estratégia acertou sequer uma quina em 2.980 apostas.
+**Nenhuma estratégia se distingue do acaso** depois da correção para múltiplas comparações. "quentes (últimos 50)" e "frias (histórico)" parecem promissoras isoladamente (p < 0,05), mas foram testadas 4 estratégias: alguma sempre pode parecer boa por sorte, e com Bonferroni a vantagem some. Nenhuma estratégia acertou sequer uma quina em 2.985 apostas.
 
 A lição: um teste estatisticamente significativo não implica um efeito explorável. O tamanho do efeito importa tanto quanto o p-valor.
 
