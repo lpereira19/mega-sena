@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from mega_sena.distances import (
-    GAP_CAP,
     consecutive_pairs,
     consecutive_pairs_pmf,
     gap_pmf,
@@ -18,7 +17,10 @@ from mega_sena.distances import (
     pair_distances,
     sorted_gaps,
 )
+from mega_sena.games import MEGA_SENA
 from mega_sena.hypothesis import random_draws
+
+GAP_CAP = MEGA_SENA.teto_salto
 
 EXAMPLE = np.array([[4, 5, 30, 33, 41, 52], [1, 2, 3, 10, 20, 60]])
 

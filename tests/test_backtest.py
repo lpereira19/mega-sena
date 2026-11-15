@@ -2,7 +2,7 @@ import numpy as np
 
 from mega_sena.hypothesis import random_draws
 from mega_sena.modeling.backtest import (
-    EXPECTED_HITS,
+    expected_hits,
     cold_strategy,
     count_hits,
     hot_strategy,
@@ -46,4 +46,4 @@ def test_backtest_has_no_lookahead():
 def test_hot_strategy_matches_chance_on_random_data():
     draws = random_draws(3000, np.random.default_rng(2))
     hits = run_backtest(draws, hot_strategy(), start=100)
-    assert abs(hits.mean() - EXPECTED_HITS) < 0.05
+    assert abs(hits.mean() - expected_hits()) < 0.05

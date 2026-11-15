@@ -18,24 +18,18 @@ import pandas as pd
 import typer
 
 from mega_sena import distances
-from mega_sena.config import (
-    BACKTEST_SUMMARY_FILE,
-    DISTANCE_TESTS_FILE,
-    HYPOTHESIS_TESTS_FILE,
-    NUMBERS_PER_DRAW,
-    PROCESSED_RESULTS_FILE,
-    PROJ_ROOT,
-    TOTAL_NUMBERS,
-)
+from mega_sena.config import PROJ_ROOT
 from mega_sena.dataset import load_processed
 from mega_sena.features import draws_matrix, number_frequencies
+from mega_sena.games import MEGA_SENA
 from mega_sena.hypothesis import (
     EVEN_ODD_TEST,
     FREQUENCY_MC_TEST,
     FREQUENCY_TEST,
     QUADRANT_TEST,
+    format_test_name,
 )
-from mega_sena.modeling.backtest import EXPECTED_HITS
+from mega_sena.modeling.backtest import expected_hits
 
 app = typer.Typer()
 
@@ -44,6 +38,12 @@ START_MARKER = "<!-- RESULTADOS:INICIO (gerado por mega_sena.report; não edite 
 END_MARKER = "<!-- RESULTADOS:FIM -->"
 ALPHA = 0.05
 HOT_STRATEGY = "quentes (histórico)"
+
+# O README descreve a Mega-Sena; a comparação entre jogos vem numa etapa posterior.
+SPEC = MEGA_SENA
+FREQ_TEST = format_test_name(FREQUENCY_TEST, SPEC)
+FREQ_MC_TEST = format_test_name(FREQUENCY_MC_TEST, SPEC)
+FIGURES = SPEC.paths.figures.relative_to(PROJ_ROOT).as_posix()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -88,10 +88,10 @@ def _join(items: list[str]) -> str:
 
 def period_table(tests: pd.DataFrame) -> pd.DataFrame:
     """Linhas exploratórias do teste de frequência por período."""
-    rows = tests[tests["teste"].str.startswith(f"{FREQUENCY_TEST}, ")]
+    rows = tests[tests["teste"].str.startswith(f"{FREQ_TEST}, ")]
     return pd.DataFrame(
         {
-            "periodo": rows["teste"].str.removeprefix(f"{FREQUENCY_TEST}, ").str.replace("-", "–"),
+            "periodo": rows["teste"].str.removeprefix(f"{FREQ_TEST}, ").str.replace("-", "–"),
             "concursos": rows["observacao"].str.extract(r"(\d+) concursos")[0].astype(int),
             "p_valor": rows["p_valor"],
         }
@@ -101,8 +101,8 @@ def period_table(tests: pd.DataFrame) -> pd.DataFrame:
 def frequency_reading(df: pd.DataFrame, tests: pd.DataFrame) -> str:
     """Parágrafo sobre a uniformidade das frequências das 60 dezenas."""
     freq = number_frequencies(draws_matrix(df))
-    expected = len(df) * NUMBERS_PER_DRAW / TOTAL_NUMBERS
-    p_freq, p_mc = _p_value(tests, FREQUENCY_TEST), _p_value(tests, FREQUENCY_MC_TEST)
+    expected = len(df) * SPEC.sorteadas / SPEC.n
+    p_freq, p_mc = _p_value(tests, FREQ_TEST), _p_value(tests, FREQ_MC_TEST)
     top, bottom = int(freq.idxmax()), int(freq.idxmin())
 
     if p_freq < ALPHA:
@@ -170,7 +170,7 @@ def backtest_reading(summary: pd.DataFrame) -> str:
     lines = [
         "| Estratégia | Acertos por concurso | p (Monte Carlo) | p (Bonferroni) |",
         "|---|---|---|---|",
-        f"| *esperado ao acaso* | *{fmt_num(EXPECTED_HITS)}* | | |",
+        f"| *esperado ao acaso* | *{fmt_num(expected_hits(SPEC))}* | | |",
     ]
     lines += [
         f"| {row.estrategia} | {fmt_num(row.media_acertos)} | "
@@ -212,7 +212,7 @@ def backtest_reading(summary: pd.DataFrame) -> str:
 
 def conclusions(df: pd.DataFrame, tests: pd.DataFrame, summary: pd.DataFrame) -> str:
     """Lista de conclusões (usada no notebook)."""
-    p_freq = _p_value(tests, FREQUENCY_TEST)
+    p_freq = _p_value(tests, FREQ_TEST)
     any_strategy = (summary["p_valor_mc_bonferroni"] < ALPHA).any()
     freq = (
         "A frequência das dezenas **não** é perfeitamente uniforme no histórico completo."
@@ -244,7 +244,7 @@ def conclusions(df: pd.DataFrame, tests: pd.DataFrame, summary: pd.DataFrame) ->
 
 def summary_table(tests: pd.DataFrame, summary: pd.DataFrame) -> str:
     """Tabela-resumo do topo da seção de resultados."""
-    p_freq, p_mc = _p_value(tests, FREQUENCY_TEST), _p_value(tests, FREQUENCY_MC_TEST)
+    p_freq, p_mc = _p_value(tests, FREQ_TEST), _p_value(tests, FREQ_MC_TEST)
     p_even, p_quad = _p_value(tests, EVEN_ODD_TEST), _p_value(tests, QUADRANT_TEST)
     hot = summary.set_index("estrategia").loc[HOT_STRATEGY]
     min_bonf = summary["p_valor_mc_bonferroni"].min()
@@ -350,20 +350,20 @@ Histórico analisado: **{fmt_int(len(df))} concursos**, de {first["data"]:%d/%m/
 
 {summary_table(tests, summary)}
 
-![Frequência de cada dezena](reports/figures/frequencia_dezenas.png)
+![Frequência de cada dezena]({FIGURES}/frequencia_dezenas.png)
 
 {frequency_reading(df, tests)}
 
 {period_reading(tests)}
 
-![Desvio acumulado](reports/figures/frequencia_acumulada.png)
+![Desvio acumulado]({FIGURES}/frequencia_acumulada.png)
 
 O desvio acumulado mostra como cada dezena se afasta do esperado ao longo do tempo, com \
 destaque para as 3 mais e as 3 menos sorteadas. O envelope cinza vale para uma dezena isolada: \
 com 60 dezenas, é normal que algumas o ultrapassem.
 
-![Pares e ímpares](reports/figures/pares_impares.png)
-![Quadrantes](reports/figures/quadrantes.png)
+![Pares e ímpares]({FIGURES}/pares_impares.png)
+![Quadrantes]({FIGURES}/quadrantes.png)
 
 {structure_reading(tests)}
 
@@ -372,11 +372,11 @@ com 60 dezenas, é normal que algumas o ultrapassem.
 Quão próximas saem as dezenas de um mesmo concurso? Números "colados", sequências e a dezena \
 mais próxima de cada uma, comparados com as distribuições exatas de um sorteio aleatório.
 
-![Distâncias](reports/figures/distancias.png)
+![Distâncias]({FIGURES}/distancias.png)
 
 {distance_reading(df, distance_tests)}
 
-![Vizinhança](reports/figures/vizinhanca.png)
+![Vizinhança]({FIGURES}/vizinhanca.png)
 
 À esquerda, distâncias curtas são mais comuns só porque existem mais pares assim no volante \
 (há 59 pares a distância 1 e só 1 par a distância 59). À direita, as dezenas das pontas (01 e \
@@ -384,7 +384,7 @@ mais próxima de cada uma, comparados com as distribuições exatas de um sortei
 
 ### Backtest
 
-![Backtest](reports/figures/backtest.png)
+![Backtest]({FIGURES}/backtest.png)
 
 {backtest_reading(summary)}
 
@@ -407,19 +407,19 @@ def update_readme(text: str, path: Path = README_FILE) -> None:
 
 
 @app.command()
-def main(
-    input_path: Path = PROCESSED_RESULTS_FILE,
-    tests_path: Path = HYPOTHESIS_TESTS_FILE,
-    summary_path: Path = BACKTEST_SUMMARY_FILE,
-    distance_path: Path = DISTANCE_TESTS_FILE,
-    readme_path: Path = README_FILE,
-):
+def main():
     """Reescreve a seção de resultados do README a partir dos arquivos de resultados."""
+    run()
+
+
+def run(readme_path: Path = README_FILE) -> None:
+    """Reescreve a seção de resultados do README com os resultados atuais da Mega-Sena."""
+    paths = SPEC.paths
     text = render_results(
-        load_processed(input_path),
-        pd.read_csv(tests_path),
-        pd.read_csv(summary_path),
-        pd.read_csv(distance_path),
+        load_processed(SPEC),
+        pd.read_csv(paths.hypothesis_tests),
+        pd.read_csv(paths.backtest_summary),
+        pd.read_csv(paths.distance_tests),
     )
     update_readme(text, readme_path)
     logger.success(f"Seção de resultados do README atualizada ({readme_path}).")

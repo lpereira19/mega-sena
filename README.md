@@ -35,7 +35,7 @@ Histórico analisado: **3.085 concursos**, de 11/03/1996 a 12/11/2026 (último c
 | Apostar nas "quentes" vence o acaso? | Não | 0,604 |
 | Alguma das 4 estratégias vence o acaso (com Bonferroni)? | Não | menor p: 0,116 |
 
-![Frequência de cada dezena](reports/figures/frequencia_dezenas.png)
+![Frequência de cada dezena](reports/figures/megasena/frequencia_dezenas.png)
 
 **A frequência das dezenas não é perfeitamente uniforme.** O teste global rejeita H0 (p = 0,005), e o teste de Monte Carlo, que não depende de aproximações, confirma (p = 0,007). A dezena 10 saiu 362 vezes e a 26 saiu 250, contra 308 esperadas.
 
@@ -47,12 +47,12 @@ Histórico analisado: **3.085 concursos**, de 11/03/1996 a 12/11/2026 (último c
 
 Essa quebra é **exploratória**: as janelas foram escolhidas depois de ver o teste global, então os p-valores por período não são confirmatórios. O desvio se concentra em 2016–2026 (p < 0,001). Isso sugere hipóteses, como mudança de equipamento ou viés físico das bolas, mas não as confirma: com os dados disponíveis, não dá para separar um viés real de um evento raro do acaso.
 
-![Desvio acumulado](reports/figures/frequencia_acumulada.png)
+![Desvio acumulado](reports/figures/megasena/frequencia_acumulada.png)
 
 O desvio acumulado mostra como cada dezena se afasta do esperado ao longo do tempo, com destaque para as 3 mais e as 3 menos sorteadas. O envelope cinza vale para uma dezena isolada: com 60 dezenas, é normal que algumas o ultrapassem.
 
-![Pares e ímpares](reports/figures/pares_impares.png)
-![Quadrantes](reports/figures/quadrantes.png)
+![Pares e ímpares](reports/figures/megasena/pares_impares.png)
+![Quadrantes](reports/figures/megasena/quadrantes.png)
 
 A composição de pares e ímpares segue a hipergeométrica prevista pela teoria (p = 0,186), e os quadrantes recebem 25% das dezenas cada (p = 0,180).
 
@@ -60,7 +60,7 @@ A composição de pares e ímpares segue a hipergeométrica prevista pela teoria
 
 Quão próximas saem as dezenas de um mesmo concurso? Números "colados", sequências e a dezena mais próxima de cada uma, comparados com as distribuições exatas de um sorteio aleatório.
 
-![Distâncias](reports/figures/distancias.png)
+![Distâncias](reports/figures/megasena/distancias.png)
 
 - **42,0%** dos concursos tiveram ao menos um par de dezenas consecutivas (como 22 e 23), contra 42,1% esperados.
 - **97** concursos tiveram 3 ou mais dezenas seguidas (esperado: 99), e **5** tiveram 4 ou mais (esperado: 5,2).
@@ -77,13 +77,13 @@ Quão próximas saem as dezenas de um mesmo concurso? Números "colados", sequê
 
 **Nenhuma medida de distância foge do acaso** depois da correção para múltiplas comparações. "Vizinha mais próxima de cada dezena (Monte Carlo)" tem p < 0,05 isoladamente, mas foram feitos 6 testes, e com Bonferroni o resultado deixa de ser significativo. No gráfico por dezena, 24, 27, 40 e 51 ficam fora da faixa de 95%; com 60 dezenas, espera-se que cerca de 3 fiquem fora por puro acaso.
 
-![Vizinhança](reports/figures/vizinhanca.png)
+![Vizinhança](reports/figures/megasena/vizinhanca.png)
 
 À esquerda, distâncias curtas são mais comuns só porque existem mais pares assim no volante (há 59 pares a distância 1 e só 1 par a distância 59). À direita, as dezenas das pontas (01 e 60) têm a vizinha mais longe porque só têm vizinhas de um lado.
 
 ### Backtest
 
-![Backtest](reports/figures/backtest.png)
+![Backtest](reports/figures/megasena/backtest.png)
 
 | Estratégia | Acertos por concurso | p (Monte Carlo) | p (Bonferroni) |
 |---|---|---|---|
@@ -211,30 +211,34 @@ uv run python -m mega_sena.pipeline
 uv run python -m mega_sena.dataset        # ETL (download incremental)
 uv run python -m mega_sena.features       # features por concurso
 uv run python -m mega_sena.hypothesis     # testes de hipótese
+uv run python -m mega_sena.distances      # distância entre as dezenas
 uv run python -m mega_sena.modeling.backtest
-uv run python -m mega_sena.plots          # figuras em reports/figures
+uv run python -m mega_sena.plots          # figuras em reports/figures/<jogo>
 uv run python -m mega_sena.report         # seção de resultados do README
 
 uv run pytest                             # testes
 ```
 
-Com `make` disponível (Linux/macOS/WSL), `make all` faz o mesmo que o pipeline. Todos os passos usam
-semente fixa (`RANDOM_SEED` em [`config.py`](mega_sena/config.py)) e são reprodutíveis.
+Todos os comandos aceitam `--jogo <slug>` (padrão: `megasena`). As regras de cada loteria ficam
+em [`games.py`](mega_sena/games.py). Com `make` disponível (Linux/macOS/WSL), `make all` faz o
+mesmo que o pipeline. Todos os passos usam semente fixa (`RANDOM_SEED` em
+[`config.py`](mega_sena/config.py)) e são reprodutíveis.
 
 ## Organização
 
 ```
 ├── data
-│   ├── raw            <- JSONs da API (append-only, fora do git)
-│   └── processed      <- megasena.csv e features.csv (fora do git)
-├── models             <- Resultados do backtest (resumo, acertos, distribuição nula)
+│   ├── raw            <- JSONs da API, um arquivo por jogo (append-only, fora do git)
+│   └── processed      <- <jogo>.csv e <jogo>_features.csv (fora do git)
+├── models/<jogo>      <- Resultados do backtest (resumo, acertos, distribuição nula)
 ├── notebooks          <- Notebook com a análise completa, já executado
 ├── reports
-│   ├── figures        <- Figuras da EDA e do backtest
-│   └── hypothesis_tests.csv
+│   ├── figures/<jogo> <- Figuras da EDA e do backtest
+│   └── <jogo>         <- Tabelas dos testes de hipótese e de distância
 ├── tests              <- Testes unitários e de calibração estatística
 └── mega_sena
-    ├── config.py      <- Caminhos e constantes (60 dezenas, 6 por concurso, semente)
+    ├── config.py      <- Pastas do projeto e semente aleatória
+    ├── games.py       <- Regras de cada loteria (volante, sorteadas, aposta) e arquivos
     ├── dataset.py     <- ETL
     ├── features.py    <- Paridade, quadrantes, frequências
     ├── hypothesis.py  <- Testes qui-quadrado (com correção) e Monte Carlo

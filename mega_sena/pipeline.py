@@ -1,4 +1,4 @@
-"""Atualização completa do projeto com os concursos mais recentes.
+"""Atualização completa de um jogo com os concursos mais recentes.
 
 Roda em sequência:
 
@@ -7,13 +7,13 @@ Roda em sequência:
 3. Testes de hipótese
 4. Testes de distância entre as dezenas
 5. Backtest das estratégias
-6. Figuras em ``reports/figures``
-7. Seção de resultados do README
-8. Reexecução do notebook, para as saídas salvas refletirem os novos dados
+6. Figuras em ``reports/figures/<jogo>``
+7. Seção de resultados do README e reexecução do notebook (só na Mega-Sena, por enquanto)
 
 Uso::
 
-    python -m mega_sena.pipeline                  # atualização completa
+    python -m mega_sena.pipeline                  # atualização completa da Mega-Sena
+    python -m mega_sena.pipeline --jogo megasena  # escolhe o jogo
     python -m mega_sena.pipeline --skip-download  # só reprocessa os dados já baixados
 """
 
@@ -26,7 +26,8 @@ import pandas as pd
 import typer
 
 from mega_sena import dataset, distances, features, hypothesis, plots, report
-from mega_sena.config import PROCESSED_RESULTS_FILE, PROJ_ROOT, RANDOM_SEED
+from mega_sena.config import PROJ_ROOT, RANDOM_SEED
+from mega_sena.games import MEGA_SENA, GameSpec, get_game
 from mega_sena.modeling import backtest
 
 app = typer.Typer()
@@ -34,8 +35,9 @@ app = typer.Typer()
 NOTEBOOK_FILE = PROJ_ROOT / "notebooks" / "1.0-lsp-analise-mega-sena.ipynb"
 
 
-def _last_contest(path: Path = PROCESSED_RESULTS_FILE) -> int:
-    """Número do último concurso no CSV processado (0 se ainda não existir)."""
+def _last_contest(spec: GameSpec) -> int:
+    """Número do último concurso no CSV processado do jogo (0 se ainda não existir)."""
+    path = spec.paths.processed
     return int(pd.read_csv(path, usecols=["concurso"])["concurso"].max()) if path.exists() else 0
 
 
@@ -51,8 +53,48 @@ def execute_notebook(path: Path = NOTEBOOK_FILE, timeout: int = 600) -> None:
     nbformat.write(notebook, path)
 
 
+def run(
+    spec: GameSpec,
+    skip_download: bool = False,
+    run_notebook: bool = True,
+    n_sims: int = 2000,
+    seed: int = RANDOM_SEED,
+) -> int:
+    """Atualiza dados, análises e figuras de um jogo.
+
+    Returns:
+        Número do último concurso processado.
+    """
+    before = _last_contest(spec)
+    dataset.run(spec, skip_download=skip_download)
+    after = _last_contest(spec)
+    if after == before:
+        logger.info(
+            f"{spec.nome}: nenhum concurso novo (último: {after}); recalculando mesmo assim."
+        )
+    else:
+        logger.info(f"{spec.nome}: concursos novos: {before + 1} a {after}.")
+
+    features.run(spec)
+    hypothesis.run(spec, n_sims, seed)
+    distances.run(spec, n_sims, seed)
+    backtest.run(spec, n_sims=n_sims, seed=seed)
+    plots.run(spec)
+
+    if spec == MEGA_SENA:
+        report.run()
+        if run_notebook:
+            logger.info("Reexecutando o notebook...")
+            execute_notebook()
+            logger.info(f"Notebook atualizado: {NOTEBOOK_FILE}")
+
+    logger.success(f"{spec.nome}: projeto atualizado até o concurso {after}.")
+    return after
+
+
 @app.command()
 def main(
+    jogo: str = typer.Option(MEGA_SENA.slug, help="Jogo (slug da API)."),
     skip_download: bool = typer.Option(
         False, help="Não consulta a API; usa os dados já baixados."
     ),
@@ -61,57 +103,7 @@ def main(
     seed: int = RANDOM_SEED,
 ):
     """Atualiza dados, análises, figuras, README e notebook."""
-    before = _last_contest()
-
-    dataset.main(
-        raw_path=dataset.RAW_RESULTS_FILE,
-        output_path=PROCESSED_RESULTS_FILE,
-        skip_download=skip_download,
-        workers=2,
-        delay=0.25,
-    )
-    after = _last_contest()
-    if after == before:
-        logger.info(f"Nenhum concurso novo (último: {after}); recalculando mesmo assim.")
-    else:
-        logger.info(f"Concursos novos: {before + 1} a {after}.")
-
-    features.main(input_path=PROCESSED_RESULTS_FILE, output_path=features.FEATURES_FILE)
-    hypothesis.main(
-        input_path=PROCESSED_RESULTS_FILE,
-        output_path=hypothesis.HYPOTHESIS_TESTS_FILE,
-        n_sims=n_sims,
-        seed=seed,
-    )
-    distances.main(
-        input_path=PROCESSED_RESULTS_FILE,
-        output_path=distances.DISTANCE_TESTS_FILE,
-        n_sims=n_sims,
-        seed=seed,
-    )
-    backtest.main(
-        input_path=PROCESSED_RESULTS_FILE,
-        summary_path=backtest.BACKTEST_SUMMARY_FILE,
-        hits_path=backtest.BACKTEST_HITS_FILE,
-        null_path=backtest.BACKTEST_NULL_FILE,
-        start=100,
-        n_sims=n_sims,
-        seed=seed,
-    )
-    plots.main(input_path=PROCESSED_RESULTS_FILE, output_dir=plots.FIGURES_DIR)
-    report.main(
-        input_path=PROCESSED_RESULTS_FILE,
-        tests_path=report.HYPOTHESIS_TESTS_FILE,
-        summary_path=report.BACKTEST_SUMMARY_FILE,
-        distance_path=report.DISTANCE_TESTS_FILE,
-        readme_path=report.README_FILE,
-    )
-    if run_notebook:
-        logger.info("Reexecutando o notebook...")
-        execute_notebook()
-        logger.info(f"Notebook atualizado: {NOTEBOOK_FILE}")
-
-    logger.success(f"Projeto atualizado até o concurso {after}.")
+    run(get_game(jogo), skip_download, run_notebook, n_sims, seed)
 
 
 if __name__ == "__main__":

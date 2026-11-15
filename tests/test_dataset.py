@@ -24,7 +24,7 @@ def test_parse_contest_types_and_order():
     assert row["data"] == pd.Timestamp("1996-03-11")
     assert [row[f"d{i}"] for i in range(1, 7)] == [4, 5, 30, 33, 41, 52]
     assert [row[f"bola{i}"] for i in range(1, 7)] == [41, 5, 4, 52, 30, 33]
-    assert row["ganhadores_sena"] == 2
+    assert row["ganhadores_premio_maximo"] == 2
 
 
 def test_parse_contest_without_draw_order_falls_back_to_sorted():

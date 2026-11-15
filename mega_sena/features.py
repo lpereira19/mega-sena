@@ -1,8 +1,8 @@
 """Features derivadas dos sorteios: frequências, paridade e quadrantes do volante.
 
-O volante da Mega-Sena tem 6 linhas por 10 colunas (1-10 na primeira linha, 51-60 na última).
-Ele é dividido em quatro quadrantes de 15 dezenas cada, cortando entre a 3ª e a 4ª linhas e
-entre a 5ª e a 6ª colunas::
+O volante é lido como uma grade ``linhas x colunas`` (ver :attr:`GameSpec.volante`) e dividido
+em quatro quadrantes, cortando na metade das linhas e na metade das colunas. Na Mega-Sena, com
+6 linhas por 10 colunas, cada quadrante tem 15 dezenas::
 
          col 1-5      col 6-10
         +-----------+-----------+
@@ -11,72 +11,81 @@ entre a 5ª e a 6ª colunas::
     4-6 |    Q3     |    Q4     |   Q3: 31-35, 41-45, 51-55   Q4: 36-40, 46-50, 56-60
         +-----------+-----------+
 
+Com número ímpar de linhas ou colunas, os quadrantes têm tamanhos diferentes; os testes usam o
+tamanho real de cada um (:func:`quadrant_sizes`).
+
 Uso::
 
-    python -m mega_sena.features   # grava data/processed/features.csv
+    python -m mega_sena.features   # grava data/processed/<jogo>_features.csv
 """
 
-from pathlib import Path
+import re
 
 from loguru import logger
 import numpy as np
 import pandas as pd
 import typer
 
-from mega_sena.config import (
-    DRAW_COLUMNS,
-    FEATURES_FILE,
-    PROCESSED_RESULTS_FILE,
-    TOTAL_NUMBERS,
-)
 from mega_sena.dataset import load_processed
+from mega_sena.games import MEGA_SENA, GameSpec, get_game
 
 app = typer.Typer()
 
-VOLANTE_ROWS, VOLANTE_COLS = 6, 10
 N_QUADRANTS = 4
 QUADRANT_COLUMNS = [f"q{i}" for i in range(1, N_QUADRANTS + 1)]
 
 
 def draws_matrix(df: pd.DataFrame) -> np.ndarray:
-    """Extrai as dezenas sorteadas como matriz inteira de formato (concursos, 6)."""
-    return df[DRAW_COLUMNS].to_numpy(dtype=int)
+    """Extrai as dezenas sorteadas (colunas ``d1``..``dK``) como matriz inteira (concursos, K)."""
+    columns = [col for col in df.columns if re.fullmatch(r"d\d+", col)]
+    return df[columns].to_numpy(dtype=int)
 
 
-def quadrant_of(numbers: np.ndarray | int) -> np.ndarray:
+def quadrant_of(numbers: np.ndarray | int, spec: GameSpec = MEGA_SENA) -> np.ndarray:
     """Retorna o quadrante (1 a 4) de cada dezena, segundo o layout do volante."""
-    numbers = np.asarray(numbers)
-    row, col = np.divmod(numbers - 1, VOLANTE_COLS)
-    return 1 + 2 * (row >= VOLANTE_ROWS // 2) + (col >= VOLANTE_COLS // 2)
+    rows, cols = spec.volante
+    row, col = np.divmod(np.asarray(numbers) - spec.menor, cols)
+    return 1 + 2 * (row >= rows // 2) + (col >= cols // 2)
 
 
-def number_frequencies(draws: np.ndarray) -> pd.Series:
-    """Conta quantas vezes cada dezena (1 a 60) foi sorteada.
+def quadrant_sizes(spec: GameSpec = MEGA_SENA) -> np.ndarray:
+    """Quantas dezenas do volante pertencem a cada quadrante."""
+    return np.bincount(quadrant_of(spec.numbers, spec), minlength=N_QUADRANTS + 1)[1:]
+
+
+def even_count(spec: GameSpec = MEGA_SENA) -> int:
+    """Quantas dezenas pares existem no volante."""
+    return int((spec.numbers % 2 == 0).sum())
+
+
+def number_frequencies(draws: np.ndarray, spec: GameSpec = MEGA_SENA) -> pd.Series:
+    """Conta quantas vezes cada dezena do volante foi sorteada.
 
     Returns:
-        Série indexada pela dezena, com todas as 60 dezenas (inclusive as nunca sorteadas).
+        Série indexada pela dezena, com todas as dezenas (inclusive as nunca sorteadas).
     """
-    counts = np.bincount(draws.ravel(), minlength=TOTAL_NUMBERS + 1)[1:]
-    return pd.Series(counts, index=pd.RangeIndex(1, TOTAL_NUMBERS + 1, name="dezena"), name="freq")
+    counts = np.bincount(draws.ravel() - spec.menor, minlength=spec.n)
+    return pd.Series(counts, index=pd.Index(spec.numbers, name="dezena"), name="freq")
 
 
-def cumulative_frequencies(draws: np.ndarray) -> pd.DataFrame:
+def cumulative_frequencies(draws: np.ndarray, spec: GameSpec = MEGA_SENA) -> pd.DataFrame:
     """Frequência acumulada de cada dezena ao longo dos concursos.
 
     Returns:
-        DataFrame (concursos x 60): a linha ``t`` traz quantas vezes cada dezena saiu entre o
-        primeiro concurso e o concurso ``t``, inclusive.
+        DataFrame (concursos x dezenas): a linha ``t`` traz quantas vezes cada dezena saiu entre
+        o primeiro concurso e o concurso ``t``, inclusive.
     """
-    indicator = np.zeros((len(draws), TOTAL_NUMBERS + 1), dtype=int)
-    np.put_along_axis(indicator, draws, 1, axis=1)
-    return pd.DataFrame(indicator[:, 1:].cumsum(axis=0), columns=range(1, TOTAL_NUMBERS + 1))
+    indicator = np.zeros((len(draws), spec.n), dtype=int)
+    np.put_along_axis(indicator, draws - spec.menor, 1, axis=1)
+    return pd.DataFrame(indicator.cumsum(axis=0), columns=spec.numbers)
 
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
+def build_features(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> pd.DataFrame:
     """Calcula as features de cada concurso.
 
     Args:
         df: Resultados processados (ver :func:`mega_sena.dataset.build_dataframe`).
+        spec: Jogo dos resultados.
 
     Returns:
         DataFrame com ``concurso``, ``data``, ``pares``, ``impares``, ``soma`` (soma das
@@ -85,7 +94,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     draws = draws_matrix(df)
     evens = (draws % 2 == 0).sum(axis=1)
-    quadrants = quadrant_of(draws)
+    quadrants = quadrant_of(draws, spec)
 
     features = df[["concurso", "data"]].copy()
     features["pares"] = evens
@@ -97,16 +106,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return features
 
 
+def run(spec: GameSpec) -> pd.DataFrame:
+    """Gera e grava o arquivo de features de um jogo."""
+    logger.info(f"{spec.nome}: gerando features...")
+    features = build_features(load_processed(spec), spec)
+    features.to_csv(spec.paths.features, index=False)
+    logger.success(f"Features de {len(features)} concursos salvas em {spec.paths.features}.")
+    return features
+
+
 @app.command()
-def main(
-    input_path: Path = PROCESSED_RESULTS_FILE,
-    output_path: Path = FEATURES_FILE,
-):
+def main(jogo: str = typer.Option(MEGA_SENA.slug, help="Jogo (slug da API).")):
     """Gera o arquivo de features a partir dos resultados processados."""
-    logger.info("Gerando features...")
-    features = build_features(load_processed(input_path))
-    features.to_csv(output_path, index=False)
-    logger.success(f"Features de {len(features)} concursos salvas em {output_path}.")
+    run(get_game(jogo))
 
 
 if __name__ == "__main__":

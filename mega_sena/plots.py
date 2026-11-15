@@ -1,15 +1,14 @@
 """Visualizações da análise exploratória e do backtest.
 
 Cada função recebe os dados e devolve uma ``matplotlib.figure.Figure``, então funciona tanto
-num notebook quanto no comando abaixo, que salva todas as figuras em ``reports/figures``::
+num notebook quanto no comando abaixo, que salva todas as figuras em
+``reports/figures/<jogo>``::
 
     python -m mega_sena.plots
 
 Em todos os gráficos, a referência teórica (o que se espera de um sorteio uniforme) aparece em
 cinza, para o desvio observado ficar visível.
 """
-
-from pathlib import Path
 
 from loguru import logger
 from matplotlib.colors import LinearSegmentedColormap
@@ -21,28 +20,19 @@ import seaborn as sns
 import typer
 
 from mega_sena import distances
-from mega_sena.config import (
-    BACKTEST_HITS_FILE,
-    BACKTEST_NULL_FILE,
-    BACKTEST_SUMMARY_FILE,
-    FIGURES_DIR,
-    NUMBERS_PER_DRAW,
-    PROCESSED_RESULTS_FILE,
-    TOTAL_NUMBERS,
-)
 from mega_sena.dataset import load_processed
 from mega_sena.features import (
-    N_QUADRANTS,
     QUADRANT_COLUMNS,
-    VOLANTE_COLS,
-    VOLANTE_ROWS,
     build_features,
     cumulative_frequencies,
     draws_matrix,
+    even_count,
     number_frequencies,
+    quadrant_sizes,
 )
+from mega_sena.games import MEGA_SENA, GameSpec, get_game
 from mega_sena.hypothesis import hypergeom_pmf
-from mega_sena.modeling.backtest import EXPECTED_HITS
+from mega_sena.modeling.backtest import expected_hits, hits_pmf
 
 app = typer.Typer()
 
@@ -55,7 +45,10 @@ SEQUENTIAL = LinearSegmentedColormap.from_list(
     "blues", ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
 )
 
-P_NUMBER = NUMBERS_PER_DRAW / TOTAL_NUMBERS  # probabilidade de uma dezena sair num concurso
+
+def _p_number(spec: GameSpec) -> float:
+    """Probabilidade de uma dezena sair num concurso: K/N."""
+    return spec.sorteadas / spec.n
 
 
 def set_style() -> None:
@@ -82,16 +75,19 @@ def set_style() -> None:
     )
 
 
-def plot_number_frequency(df: pd.DataFrame, n_highlight: int = 6) -> Figure:
+def plot_number_frequency(
+    df: pd.DataFrame, n_highlight: int = 6, spec: GameSpec = MEGA_SENA
+) -> Figure:
     """Frequência acumulada de cada dezena, com a faixa esperada sob sorteio uniforme.
 
-    A faixa cinza é o intervalo de 95% da Binomial(n_concursos, 0,1) de cada dezena. Com 60
-    dezenas, espera-se que cerca de 3 fiquem fora dela por puro acaso.
+    A faixa cinza é o intervalo de 95% da Binomial(n_concursos, K/N) de cada dezena. Com N
+    dezenas, espera-se que cerca de 5% delas fiquem fora da faixa por puro acaso.
     """
-    freq = number_frequencies(draws_matrix(df))
+    freq = number_frequencies(draws_matrix(df), spec)
     n = len(df)
-    expected = n * P_NUMBER
-    half_band = 1.96 * np.sqrt(n * P_NUMBER * (1 - P_NUMBER))
+    p = _p_number(spec)
+    expected = n * p
+    half_band = 1.96 * np.sqrt(n * p * (1 - p))
     top = set(freq.nlargest(n_highlight).index)
     bottom = set(freq.nsmallest(n_highlight).index)
     colors = [SERIES[1] if d in top else SERIES[0] if d in bottom else MUTED for d in freq.index]
@@ -102,7 +98,7 @@ def plot_number_frequency(df: pd.DataFrame, n_highlight: int = 6) -> Figure:
     ax.axhline(expected, color=REFERENCE, lw=1.5, ls="--")
     ax.annotate(
         f"esperado: {expected:.0f} (faixa de 95%)",
-        xy=(TOTAL_NUMBERS + 0.6, expected),
+        xy=(spec.maior + 0.6, expected),
         va="center",
         color=TEXT_SECONDARY,
         fontsize=9,
@@ -120,9 +116,9 @@ def plot_number_frequency(df: pd.DataFrame, n_highlight: int = 6) -> Figure:
             color=TEXT_SECONDARY,
         )
 
-    ax.set_xticks(range(1, TOTAL_NUMBERS + 1))
+    ax.set_xticks(spec.numbers)
     ax.tick_params(axis="x", labelsize=8)
-    ax.set_xlim(0.3, TOTAL_NUMBERS + 0.7)
+    ax.set_xlim(spec.menor - 0.7, spec.maior + 0.7)
     ax.set_ylim(freq.min() * 0.85, freq.max() * 1.12)  # folga para a legenda
     ax.set_xlabel("Dezena")
     ax.set_ylabel("Vezes sorteada")
@@ -149,7 +145,9 @@ def _spread_labels(values: pd.Series, min_gap: float) -> pd.Series:
     return pd.Series(positions, index=ordered.index)
 
 
-def plot_cumulative_frequency(df: pd.DataFrame, n_highlight: int = 3) -> Figure:
+def plot_cumulative_frequency(
+    df: pd.DataFrame, n_highlight: int = 3, spec: GameSpec = MEGA_SENA
+) -> Figure:
     """Evolução do desvio da frequência acumulada de cada dezena em relação ao esperado.
 
     Cada linha é ``frequência acumulada - esperado`` ao longo dos concursos. Sob aleatoriedade,
@@ -157,13 +155,14 @@ def plot_cumulative_frequency(df: pd.DataFrame, n_highlight: int = 3) -> Figure:
     concursos. As dezenas "quentes" de hoje são simplesmente as que estão no topo desse
     passeio agora.
     """
-    cumulative = cumulative_frequencies(draws_matrix(df))
+    p = _p_number(spec)
+    cumulative = cumulative_frequencies(draws_matrix(df), spec)
     t = np.arange(1, len(cumulative) + 1)
-    deviation = cumulative.sub(t * P_NUMBER, axis=0)
+    deviation = cumulative.sub(t * p, axis=0)
     deviation.index = df["concurso"]
     final = deviation.iloc[-1]
     highlighted = [*final.nlargest(n_highlight).index, *final.nsmallest(n_highlight).index]
-    envelope = 1.96 * np.sqrt(t * P_NUMBER * (1 - P_NUMBER))
+    envelope = 1.96 * np.sqrt(t * p * (1 - p))
 
     fig, ax = plt.subplots(figsize=(14, 5.5))
     ax.fill_between(
@@ -267,12 +266,13 @@ def _with_tail(values: np.ndarray, cap: int) -> np.ndarray:
     return np.append(values[:cap], values[cap:].sum())
 
 
-def plot_even_odd(df: pd.DataFrame) -> Figure:
-    """Distribuição de pares e ímpares por concurso vs. a hipergeométrica (30 pares em 60)."""
-    evens = build_features(df)["pares"]
-    observed = np.bincount(evens, minlength=NUMBERS_PER_DRAW + 1) / len(evens)
-    expected = hypergeom_pmf(TOTAL_NUMBERS // 2)
-    labels = [f"{k}P / {NUMBERS_PER_DRAW - k}I" for k in range(NUMBERS_PER_DRAW + 1)]
+def plot_even_odd(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
+    """Distribuição de pares e ímpares por concurso vs. a hipergeométrica."""
+    k = spec.sorteadas
+    evens = build_features(df, spec)["pares"]
+    observed = np.bincount(evens, minlength=k + 1) / len(evens)
+    expected = hypergeom_pmf(even_count(spec), spec)
+    labels = [f"{j}P / {k - j}I" for j in range(k + 1)]
 
     fig, ax = plt.subplots(figsize=(10, 5))
     _observed_vs_expected_bars(ax, observed, expected, labels)
@@ -293,16 +293,20 @@ def plot_even_odd(df: pd.DataFrame) -> Figure:
     return fig
 
 
-def plot_quadrants(df: pd.DataFrame) -> Figure:
+def plot_quadrants(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     """Quadrantes do volante: mapa de calor das frequências e distribuição por concurso.
 
-    À esquerda, o volante 6x10 colorido pela frequência de cada dezena, com os quadrantes
+    À esquerda, o volante colorido pela frequência de cada dezena, com os quadrantes
     delimitados. À direita, a proporção de concursos com ``k`` dezenas em cada quadrante,
-    comparada à hipergeométrica (15 dezenas por quadrante).
+    comparada à hipergeométrica.
     """
-    freq = number_frequencies(draws_matrix(df))
-    grid = freq.to_numpy().reshape(VOLANTE_ROWS, VOLANTE_COLS)
-    features = build_features(df)
+    rows, cols = spec.volante
+    split_row, split_col = rows // 2, cols // 2
+    k_max = spec.sorteadas
+    freq = number_frequencies(draws_matrix(df), spec)
+    grid = freq.to_numpy().reshape(rows, cols)
+    features = build_features(df, spec)
+    sizes = quadrant_sizes(spec)
 
     fig, (ax_map, ax_dist) = plt.subplots(
         1, 2, figsize=(16, 5.5), gridspec_kw={"width_ratios": [1.15, 1]}
@@ -314,21 +318,21 @@ def plot_quadrants(df: pd.DataFrame) -> Figure:
         linewidths=2,
         linecolor=SURFACE,
         square=True,
-        annot=np.arange(1, TOTAL_NUMBERS + 1).reshape(grid.shape),
+        annot=spec.numbers.reshape(grid.shape),
         fmt="02d",
         annot_kws={"fontsize": 9},
         cbar_kws={"label": "Vezes sorteada", "shrink": 0.8},
         xticklabels=False,
         yticklabels=False,
     )
-    ax_map.axhline(VOLANTE_ROWS / 2, color=TEXT, lw=2.5)
-    ax_map.axvline(VOLANTE_COLS / 2, color=TEXT, lw=2.5)
+    ax_map.axhline(split_row, color=TEXT, lw=2.5)
+    ax_map.axvline(split_col, color=TEXT, lw=2.5)
     for q, (row, col) in enumerate([(0, 0), (0, 1), (1, 0), (1, 1)], start=1):
         total = features[f"q{q}"].sum()
         ax_map.text(
-            col * VOLANTE_COLS / 2 + 0.1,
-            row * VOLANTE_ROWS / 2 + 0.05,
-            f"Q{q}: {total} ({total / (len(df) * NUMBERS_PER_DRAW):.1%})",
+            col * split_col + 0.1,
+            row * split_row + 0.05,
+            f"Q{q}: {total} ({total / (len(df) * k_max):.1%})",
             va="top",
             fontsize=9,
             fontweight="bold",
@@ -337,13 +341,18 @@ def plot_quadrants(df: pd.DataFrame) -> Figure:
         )
     ax_map.set_title("Volante: frequência por dezena e total por quadrante")
 
-    k = np.arange(NUMBERS_PER_DRAW + 1)
-    expected = hypergeom_pmf(TOTAL_NUMBERS // N_QUADRANTS)
-    ax_dist.bar(
-        k, expected, color=REFERENCE, alpha=0.35, width=0.8, label="esperado (hipergeométrica)"
-    )
+    k = np.arange(k_max + 1)
+    if len(set(sizes)) == 1:
+        ax_dist.bar(
+            k,
+            hypergeom_pmf(sizes[0], spec),
+            color=REFERENCE,
+            alpha=0.35,
+            width=0.8,
+            label="esperado (hipergeométrica)",
+        )
     for i, column in enumerate(QUADRANT_COLUMNS):
-        observed = np.bincount(features[column], minlength=NUMBERS_PER_DRAW + 1) / len(df)
+        observed = np.bincount(features[column], minlength=k_max + 1) / len(df)
         ax_dist.plot(
             k,
             observed,
@@ -355,6 +364,8 @@ def plot_quadrants(df: pd.DataFrame) -> Figure:
             mec=SURFACE,
             mew=1.5,
         )
+        if len(set(sizes)) > 1:  # quadrantes de tamanhos diferentes: um esperado para cada
+            ax_dist.plot(k, hypergeom_pmf(sizes[i], spec), color=SERIES[i], lw=1, ls="--")
     ax_dist.set_xticks(k)
     ax_dist.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
     ax_dist.set_xlabel("Dezenas sorteadas no quadrante")
@@ -365,19 +376,42 @@ def plot_quadrants(df: pd.DataFrame) -> Figure:
     return fig
 
 
-def plot_backtest(hits: pd.DataFrame, null_means: np.ndarray, summary: pd.DataFrame) -> Figure:
+def _hit_bins(pmf: np.ndarray, min_share: float = 0.005) -> tuple[int, int]:
+    """Faixa de acertos mostrada no gráfico: os valores com ao menos ``min_share`` de chance.
+
+    As caudas raras são somadas nas pontas (ex.: "3+" na Mega-Sena).
+    """
+    frequent = np.flatnonzero(pmf >= min_share)
+    return int(frequent.min()), int(frequent.max())
+
+
+def plot_backtest(
+    hits: pd.DataFrame,
+    null_means: np.ndarray,
+    summary: pd.DataFrame,
+    spec: GameSpec = MEGA_SENA,
+) -> Figure:
     """Resultado do backtest: distribuição de acertos e médias contra a distribuição nula.
 
-    À esquerda, a proporção de concursos com 0, 1, 2 e 3+ acertos por estratégia, comparada à
-    hipergeométrica (60, 6, 6). À direita, o histograma das médias de acertos de milhares de
-    apostadores aleatórios, com a média de cada estratégia marcada.
+    À esquerda, a proporção de concursos por número de acertos e estratégia, comparada à
+    hipergeométrica (as caudas raras ficam agrupadas). À direita, o histograma das médias de
+    acertos de milhares de apostadores aleatórios, com a média de cada estratégia marcada.
     """
     strategies = summary["estrategia"].tolist()
     colors = dict(zip(strategies, SERIES))
-    max_bin = 3  # 3 ou mais acertos ficam juntos: quadras, quinas e senas são raríssimas
-    labels = ["0", "1", "2", f"{max_bin}+"]
-    expected = hypergeom_pmf(NUMBERS_PER_DRAW)
-    expected = np.append(expected[:max_bin], expected[max_bin:].sum())
+    pmf = hits_pmf(spec)
+    lo, hi = _hit_bins(pmf)
+    labels = [
+        *([f"≤{lo}"] if lo > 0 else ["0"]),
+        *map(str, range(lo + 1, hi)),
+        f"{hi}+",
+    ]
+
+    def binned(values: np.ndarray) -> np.ndarray:
+        return np.concatenate([[values[: lo + 1].sum()], values[lo + 1 : hi], [values[hi:].sum()]])
+
+    expected = binned(pmf)
+    expected_mean = expected_hits(spec)
 
     fig, (ax_dist, ax_null) = plt.subplots(1, 2, figsize=(16, 5.5))
     x = np.arange(len(labels))
@@ -394,9 +428,9 @@ def plot_backtest(hits: pd.DataFrame, null_means: np.ndarray, summary: pd.DataFr
     )
     for i, name in enumerate(strategies, start=1):
         k = np.bincount(
-            hits.loc[hits["estrategia"] == name, "acertos"], minlength=NUMBERS_PER_DRAW + 1
+            hits.loc[hits["estrategia"] == name, "acertos"], minlength=spec.sorteadas + 1
         )
-        observed = np.append(k[:max_bin], k[max_bin:].sum()) / k.sum()
+        observed = binned(k) / k.sum()
         ax_dist.bar(
             x - 0.4 + width * (i + 0.5),
             observed,
@@ -421,7 +455,7 @@ def plot_backtest(hits: pd.DataFrame, null_means: np.ndarray, summary: pd.DataFr
         label=f"{len(null_means)} apostadores aleatórios",
     )
     ax_null.axvline(
-        EXPECTED_HITS, color=REFERENCE, lw=1.5, ls="--", label=f"esperado: {EXPECTED_HITS:.1f}"
+        expected_mean, color=REFERENCE, lw=1.5, ls="--", label=f"esperado: {expected_mean:.1f}"
     )
     for _, row in summary.iterrows():
         ax_null.axvline(
@@ -440,7 +474,7 @@ def plot_backtest(hits: pd.DataFrame, null_means: np.ndarray, summary: pd.DataFr
     return fig
 
 
-def plot_distances(df: pd.DataFrame) -> Figure:
+def plot_distances(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     """Quão próximas saem as dezenas de um concurso, comparado ao acaso.
 
     Quatro painéis: pares de dezenas consecutivas por concurso, maior sequência de
@@ -449,15 +483,16 @@ def plot_distances(df: pd.DataFrame) -> Figure:
     """
     draws = draws_matrix(df)
     n = len(draws)
+    k = spec.sorteadas
     fig, axes = plt.subplots(2, 2, figsize=(16, 10))
     ax_pairs, ax_runs, ax_min, ax_gaps = axes.ravel()
     reference = "esperado (acaso)"
 
-    pairs = np.bincount(distances.consecutive_pairs(draws), minlength=NUMBERS_PER_DRAW) / n
+    pairs = np.bincount(distances.consecutive_pairs(draws), minlength=k) / n
     _observed_vs_expected_bars(
         ax_pairs,
         _with_tail(pairs, 3),
-        _with_tail(distances.consecutive_pairs_pmf(), 3),
+        _with_tail(distances.consecutive_pairs_pmf(spec), 3),
         ["0", "1", "2", "3+"],
         reference,
         annotate=True,
@@ -466,11 +501,11 @@ def plot_distances(df: pd.DataFrame) -> Figure:
     ax_pairs.set_ylabel("Proporção dos concursos")
     ax_pairs.set_title("Quantos pares consecutivos saem por concurso")
 
-    runs = np.bincount(distances.longest_run(draws), minlength=NUMBERS_PER_DRAW + 1)[1:] / n
+    runs = np.bincount(distances.longest_run(draws), minlength=k + 1)[1:] / n
     _observed_vs_expected_bars(
         ax_runs,
         _with_tail(runs, 3),
-        _with_tail(distances.longest_run_pmf(), 3),
+        _with_tail(distances.longest_run_pmf(spec), 3),
         ["nenhuma", "2 seguidas", "3 seguidas", "4+ seguidas"],
         reference,
         annotate=True,
@@ -480,7 +515,7 @@ def plot_distances(df: pd.DataFrame) -> Figure:
     ax_runs.set_title("Maior sequência de dezenas seguidas")
 
     cap = 7
-    min_pmf = distances.min_gap_pmf()
+    min_pmf = distances.min_gap_pmf(spec)
     smallest = np.bincount(distances.min_gap(draws), minlength=len(min_pmf) + 1)[1:] / n
     _observed_vs_expected_bars(
         ax_min,
@@ -494,15 +529,17 @@ def plot_distances(df: pd.DataFrame) -> Figure:
     ax_min.set_ylabel("Proporção dos concursos")
     ax_min.set_title("Quão perto ficam as duas dezenas mais próximas")
 
-    gaps = np.minimum(distances.sorted_gaps(draws), distances.GAP_CAP).ravel()
-    observed = np.bincount(gaps, minlength=distances.GAP_CAP + 1)[1:] / gaps.size
-    x = np.arange(1, distances.GAP_CAP + 1)
+    gap_cap = spec.teto_salto
+    gaps = np.minimum(distances.sorted_gaps(draws), gap_cap).ravel()
+    observed = np.bincount(gaps, minlength=gap_cap + 1)[1:] / gaps.size
+    x = np.arange(1, gap_cap + 1)
+    ticks = [1, *range(5, gap_cap, 5), gap_cap]
     ax_gaps.bar(x, observed, color=SERIES[0], width=0.8, edgecolor=SURFACE, label="observado")
     ax_gaps.plot(
-        x, distances.gap_pmf(), color=TEXT_SECONDARY, lw=2, marker="o", ms=4, label=reference
+        x, distances.gap_pmf(spec), color=TEXT_SECONDARY, lw=2, marker="o", ms=4, label=reference
     )
-    ax_gaps.set_xticks([1, 5, 10, 15, 20, distances.GAP_CAP])
-    ax_gaps.set_xticklabels(["1", "5", "10", "15", "20", f"{distances.GAP_CAP}+"])
+    ax_gaps.set_xticks(ticks)
+    ax_gaps.set_xticklabels([*map(str, ticks[:-1]), f"{gap_cap}+"])
     ax_gaps.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
     ax_gaps.set_xlabel("Salto entre duas dezenas vizinhas (ordem crescente)")
     ax_gaps.set_ylabel("Proporção dos saltos")
@@ -513,24 +550,24 @@ def plot_distances(df: pd.DataFrame) -> Figure:
     return fig
 
 
-def plot_neighborhood(df: pd.DataFrame) -> Figure:
+def plot_neighborhood(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     """Distância entre todas as dezenas de cada concurso e vizinha mais próxima de cada dezena.
 
-    À esquerda, a distância entre cada um dos 15 pares de dezenas de cada concurso: distâncias
-    curtas são mais comuns só porque existem mais pares assim no volante (linha cinza). À
-    direita, para cada dezena x, a distância média até a dezena mais próxima nos concursos em
-    que x saiu, com a faixa de 95% esperada. As pontas (1 e 60) têm vizinhas só de um lado e,
-    por isso, mais distantes.
+    À esquerda, a distância entre cada par de dezenas de cada concurso: distâncias curtas são
+    mais comuns só porque existem mais pares assim no volante (linha cinza). À direita, para
+    cada dezena x, a distância média até a dezena mais próxima nos concursos em que x saiu, com
+    a faixa de 95% esperada. As pontas do volante têm vizinhas só de um lado e, por isso, mais
+    distantes.
     """
     draws = draws_matrix(df)
     fig, (ax_pairs, ax_near) = plt.subplots(1, 2, figsize=(16, 5.5))
 
     pairs = distances.pair_distances(draws).ravel()
-    observed = np.bincount(pairs, minlength=TOTAL_NUMBERS)[1:] / pairs.size
-    d = np.arange(1, TOTAL_NUMBERS)
+    observed = np.bincount(pairs, minlength=spec.n)[1:] / pairs.size
+    d = np.arange(1, spec.n)
     ax_pairs.bar(d, observed, color=SERIES[0], width=0.8, edgecolor=SURFACE, label="observado")
     ax_pairs.plot(
-        d, distances.pair_distance_pmf(), color=TEXT_SECONDARY, lw=2, label="esperado (acaso)"
+        d, distances.pair_distance_pmf(spec), color=TEXT_SECONDARY, lw=2, label="esperado (acaso)"
     )
     ax_pairs.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.1%}"))
     ax_pairs.set_xlabel("Distância entre duas dezenas do mesmo concurso")
@@ -538,7 +575,7 @@ def plot_neighborhood(df: pd.DataFrame) -> Figure:
     ax_pairs.set_title("Distância entre todos os pares de dezenas")
     ax_pairs.legend(loc="upper right")
 
-    table = distances.nearest_by_number(draws)
+    table = distances.nearest_by_number(draws, spec)
     numbers = table.index.to_numpy()
     half_band = 1.96 * table["desvio_padrao"] / np.sqrt(table["vezes"])
     colors = [SERIES[1] if z > 2 else SERIES[0] if z < -2 else MUTED for z in table["z"].fillna(0)]
@@ -564,7 +601,7 @@ def plot_neighborhood(df: pd.DataFrame) -> Figure:
             textcoords="offset points",
             color=TEXT_SECONDARY,
         )
-    ax_near.set_xlim(0.3, TOTAL_NUMBERS + 0.7)
+    ax_near.set_xlim(spec.menor - 0.7, spec.maior + 0.7)
     ax_near.set_xlabel("Dezena x")
     ax_near.set_ylabel("Distância média até a dezena mais próxima")
     ax_near.set_title("Quando sai a dezena x, a que distância fica a mais próxima?")
@@ -585,19 +622,19 @@ def plot_neighborhood(df: pd.DataFrame) -> Figure:
     return fig
 
 
-def plot_neighbor_offsets(df: pd.DataFrame, number: int) -> Figure:
+def plot_neighbor_offsets(df: pd.DataFrame, number: int, spec: GameSpec = MEGA_SENA) -> Figure:
     """Quando sai a dezena ``number``, quantas vezes cada outra dezena saiu junto.
 
-    Sob sorteio uniforme, cada outra dezena acompanha ``number`` com a mesma chance (5/59),
-    seja vizinha ou distante: a linha cinza é plana. A distância até ``number`` é a distância
-    horizontal até a linha vertical.
+    Sob sorteio uniforme, cada outra dezena acompanha ``number`` com a mesma chance,
+    (K - 1)/(N - 1), seja vizinha ou distante: a linha cinza é plana. A distância até
+    ``number`` é a distância horizontal até a linha vertical.
     """
     draws = draws_matrix(df)
     times = int((draws == number).any(axis=1).sum())
     offsets = distances.neighbor_offsets(draws, number)
-    counts = np.bincount(offsets + number, minlength=TOTAL_NUMBERS + 1)[1:]
-    others = np.array([y for y in range(1, TOTAL_NUMBERS + 1) if y != number])
-    p = (NUMBERS_PER_DRAW - 1) / (TOTAL_NUMBERS - 1)
+    counts = np.bincount(offsets + number - spec.menor, minlength=spec.n)
+    others = spec.numbers[spec.numbers != number]
+    p = (spec.sorteadas - 1) / (spec.n - 1)
     expected = times * p
     half_band = 1.96 * np.sqrt(times * p * (1 - p))
 
@@ -606,7 +643,7 @@ def plot_neighbor_offsets(df: pd.DataFrame, number: int) -> Figure:
     near = np.abs(others - number) <= 2
     ax.bar(
         others,
-        counts[others - 1],
+        counts[others - spec.menor],
         color=np.where(near, SERIES[1], SERIES[0]),
         width=0.8,
         edgecolor=SURFACE,
@@ -623,9 +660,9 @@ def plot_neighbor_offsets(df: pd.DataFrame, number: int) -> Figure:
         color=TEXT,
         annotation_clip=False,
     )
-    ax.set_xticks(range(1, TOTAL_NUMBERS + 1))
+    ax.set_xticks(spec.numbers)
     ax.tick_params(axis="x", labelsize=8)
-    ax.set_xlim(0.3, TOTAL_NUMBERS + 0.7)
+    ax.set_xlim(spec.menor - 0.7, spec.maior + 0.7)
     ax.set_xlabel("Dezena que saiu junto")
     ax.set_ylabel("Concursos")
     ax.set_title(
@@ -647,38 +684,49 @@ def plot_neighbor_offsets(df: pd.DataFrame, number: int) -> Figure:
     return fig
 
 
-@app.command()
-def main(
-    input_path: Path = PROCESSED_RESULTS_FILE,
-    output_dir: Path = FIGURES_DIR,
-):
-    """Gera e salva todas as figuras. A do backtest só é gerada se o backtest já tiver rodado."""
+def run(spec: GameSpec) -> list[str]:
+    """Gera e salva todas as figuras de um jogo.
+
+    A do backtest só é gerada se o backtest já tiver rodado.
+
+    Returns:
+        Nomes dos arquivos gerados.
+    """
     set_style()
-    df = load_processed(input_path)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    df = load_processed(spec)
+    paths = spec.paths
+    paths.figures.mkdir(parents=True, exist_ok=True)
 
     figures = {
-        "frequencia_dezenas.png": plot_number_frequency(df),
-        "frequencia_acumulada.png": plot_cumulative_frequency(df),
-        "pares_impares.png": plot_even_odd(df),
-        "quadrantes.png": plot_quadrants(df),
-        "distancias.png": plot_distances(df),
-        "vizinhanca.png": plot_neighborhood(df),
+        "frequencia_dezenas.png": plot_number_frequency(df, spec=spec),
+        "frequencia_acumulada.png": plot_cumulative_frequency(df, spec=spec),
+        "pares_impares.png": plot_even_odd(df, spec),
+        "quadrantes.png": plot_quadrants(df, spec),
+        "distancias.png": plot_distances(df, spec),
+        "vizinhanca.png": plot_neighborhood(df, spec),
     }
-    if BACKTEST_SUMMARY_FILE.exists():
+    if paths.backtest_summary.exists():
         figures["backtest.png"] = plot_backtest(
-            pd.read_csv(BACKTEST_HITS_FILE),
-            pd.read_csv(BACKTEST_NULL_FILE)["media_acertos"].to_numpy(),
-            pd.read_csv(BACKTEST_SUMMARY_FILE),
+            pd.read_csv(paths.backtest_hits),
+            pd.read_csv(paths.backtest_null)["media_acertos"].to_numpy(),
+            pd.read_csv(paths.backtest_summary),
+            spec,
         )
     else:
         logger.warning("Backtest ainda não rodou; pulando backtest.png.")
 
     for name, fig in figures.items():
-        fig.savefig(output_dir / name)
+        fig.savefig(paths.figures / name)
         plt.close(fig)
-        logger.info(f"Figura salva: {output_dir / name}")
-    logger.success(f"{len(figures)} figuras geradas.")
+        logger.info(f"Figura salva: {paths.figures / name}")
+    logger.success(f"{spec.nome}: {len(figures)} figuras geradas.")
+    return list(figures)
+
+
+@app.command()
+def main(jogo: str = typer.Option(MEGA_SENA.slug, help="Jogo (slug da API).")):
+    """Gera e salva todas as figuras de um jogo."""
+    run(get_game(jogo))
 
 
 if __name__ == "__main__":
