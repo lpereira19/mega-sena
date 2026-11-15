@@ -220,7 +220,8 @@ uv run pytest                             # testes
 ```
 
 Todos os comandos aceitam `--jogo <slug>` (padrão: `megasena`): `megasena`, `lotofacil`,
-`quina`, `lotomania`, `timemania` e `diadesorte`; o pipeline aceita também `--jogo todos`. As
+`quina`, `lotomania`, `timemania`, `diadesorte`, `duplasena` e `maismilionaria`; o pipeline
+aceita também `--jogo todos`. As
 regras de cada loteria ficam em [`games.py`](mega_sena/games.py). Por enquanto a seção de
 resultados acima e o notebook cobrem só a Mega-Sena; os demais jogos geram as mesmas tabelas e
 figuras nas pastas de cada um. Com `make` disponível (Linux/macOS/WSL), `make all` faz o

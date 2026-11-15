@@ -22,6 +22,7 @@ Uso::
 """
 
 from dataclasses import asdict, dataclass, replace
+from itertools import combinations
 
 from loguru import logger
 import numpy as np
@@ -49,6 +50,8 @@ FREQUENCY_MC_TEST = "Frequência das {n} dezenas (Monte Carlo)"
 EVEN_ODD_TEST = "Pares por concurso vs. hipergeométrica"
 QUADRANT_TEST = "Total de dezenas por quadrante"
 EXTRA_TEST = "{extra}: frequência das opções"
+EXTRA_COMBO_TEST = "{extra}: frequência das combinações"
+OVERLAP_TEST = "Dezenas em comum entre os dois sorteios do concurso"
 
 
 @dataclass(frozen=True)
@@ -245,7 +248,9 @@ def frequency_tests_by_period(
             spec,
         )
         results.append(
-            TestResult(**{**asdict(result), "observacao": f"pós-hoc; {len(subset)} concursos"})
+            TestResult(
+                **{**asdict(result), "observacao": f"pós-hoc; {len(subset)} {spec.unidade}"}
+            )
         )
     return results
 
@@ -287,6 +292,90 @@ def extra_test(df: pd.DataFrame, spec: GameSpec) -> TestResult:
     return result
 
 
+def extra_as_game(spec: GameSpec) -> GameSpec:
+    """O sorteio extra com várias opções por concurso visto como um jogo à parte.
+
+    Os trevos da +Milionária são 2 sorteados sem reposição entre 6: exatamente um "jogo de
+    dezenas" pequeno, e as mesmas fórmulas (correção de população finita, hipergeométrica)
+    valem para ele.
+    """
+    return GameSpec(
+        slug=f"{spec.slug}_{spec.extra}",
+        nome=spec.extra_nome,
+        menor=1,
+        maior=spec.extra_total,
+        sorteadas=spec.extra_sorteadas,
+        aposta=spec.extra_sorteadas,
+        volante=(1, spec.extra_total),
+        teto_salto=2,
+    )
+
+
+def extra_draws(df: pd.DataFrame, spec: GameSpec) -> np.ndarray:
+    """Matriz (concursos, opções sorteadas) do sorteio extra com várias opções (``"2-4"``)."""
+    values = extra_values(df, spec)
+    return np.array([[int(x) for x in value.split("-")] for value in values])
+
+
+def extra_combination_tests(df: pd.DataFrame, spec: GameSpec) -> list[TestResult]:
+    """Testes do sorteio extra com várias opções por concurso (trevos da +Milionária).
+
+    1. Frequência de cada opção: qui-quadrado com a correção de população finita, como na
+       frequência das dezenas (cada concurso sorteia ``extra_sorteadas`` opções distintas).
+    2. Frequência de cada combinação: sob H0 os C(opções, sorteadas) pares são igualmente
+       prováveis, e sai uma combinação por concurso, então vale o qui-quadrado comum. Pega
+       dependências que a frequência de cada opção sozinha não vê (ex.: o par 1-2 saindo demais).
+    """
+    game = extra_as_game(spec)
+    draws = extra_draws(df, spec)
+    counts = np.bincount(draws.ravel() - 1, minlength=spec.extra_total)
+    by_option = category_totals_test(
+        counts,
+        np.ones(spec.extra_total),
+        len(draws),
+        EXTRA_TEST.format(extra=spec.extra_nome),
+        game,
+    )
+    combos = list(combinations(range(1, spec.extra_total + 1), spec.extra_sorteadas))
+    index = {combo: i for i, combo in enumerate(combos)}
+    observed = np.bincount(
+        [index[tuple(row)] for row in np.sort(draws, axis=1)], minlength=len(combos)
+    )
+    by_combo = pmf_test(
+        observed,
+        np.full(len(combos), 1 / len(combos)),
+        EXTRA_COMBO_TEST.format(extra=spec.extra_nome),
+    )
+    return [by_option, by_combo]
+
+
+def _extra_tests(df: pd.DataFrame, spec: GameSpec) -> list[TestResult]:
+    """Testes do sorteio extra do jogo, se houver (ver :func:`extra_test`)."""
+    if not spec.extra:
+        return []
+    if spec.extra_sorteadas == 1:
+        return [extra_test(df, spec)]
+    return extra_combination_tests(df, spec)
+
+
+def overlap_test(df: pd.DataFrame, spec: GameSpec) -> TestResult:
+    """Testa se os dois sorteios de um mesmo concurso são independentes (Dupla Sena).
+
+    Se o 2º sorteio não depende do 1º, o número de dezenas em comum entre eles segue a
+    Hipergeométrica(N, K, K): é como contar quantas das K dezenas do 1º sorteio caem num
+    sorteio novo. Só entram concursos com os dois sorteios completos.
+    """
+    pivot = df.set_index(["concurso", "sorteio"])[spec.draw_columns]
+    first = pivot.xs(1, level="sorteio")
+    second = pivot.xs(2, level="sorteio").reindex(first.index).dropna().astype(int)
+    first = first.loc[second.index]
+    common = [
+        len(set(a) & set(b)) for a, b in zip(first.to_numpy(), second.to_numpy(), strict=True)
+    ]
+    observed = np.bincount(common, minlength=spec.sorteadas + 1)
+    return pmf_test(observed, hypergeom_pmf(spec.sorteadas, spec), OVERLAP_TEST)
+
+
 def run_all_tests(
     df: pd.DataFrame, n_sims: int = 2000, seed: int = RANDOM_SEED, spec: GameSpec = MEGA_SENA
 ) -> pd.DataFrame:
@@ -314,7 +403,8 @@ def run_all_tests(
         monte_carlo_frequency_test(draws, n_sims, seed, spec),
         distribution_test(evens_k, even_count(spec), EVEN_ODD_TEST, spec=spec),
         category_totals_test(quadrant_totals, sizes, n_contests, QUADRANT_TEST, spec),
-        *([extra_test(df, spec)] if spec.extra else []),
+        *_extra_tests(df, spec),
+        *([overlap_test(df, spec)] if spec.sorteios_por_concurso == 2 else []),
         *frequency_tests_by_period(df, spec=spec),
     ]
     return pd.DataFrame([asdict(result) for result in results])

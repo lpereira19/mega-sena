@@ -1,0 +1,10 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 50 dezenas,61.90030526394162,49,0.10209696336077508,corrigido 44/49
+Frequência das 50 dezenas (Monte Carlo),55.58394758394758,49,0.09345327336331834,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,6.372781079995679,4,0.17298478719790472,5 categorias
+Total de dezenas por quadrante,2.9502394956940403,3,0.3993610687576672,corrigido 44/49
+Trevos: frequência das opções,1.5970515970515968,5,0.9016056640040454,corrigido 4/5
+Trevos: frequência das combinações,6.402948402948403,14,0.9552912260002757,15 categorias
+"Frequência das 50 dezenas, 2022-2023",53.78451178451178,49,0.2962225494092559,pós-hoc; 108 concursos
+"Frequência das 50 dezenas, 2024-2024",49.691968225948806,49,0.44555379759604363,pós-hoc; 103 concursos
+"Frequência das 50 dezenas, 2025-2026",57.78787878787878,49,0.1824569956476343,pós-hoc; 196 concursos

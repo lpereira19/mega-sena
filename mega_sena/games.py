@@ -59,6 +59,10 @@ class GameSpec:
             ``None`` se nunca mudou. O teste e a figura do sorteio extra usam só os concursos
             até aqui: depois, a Timemania passou a trocar clubes da lista, e sem saber quais
             valiam em cada concurso não dá para calcular a frequência esperada.
+        extra_sorteadas: Opções do sorteio extra sorteadas por concurso, sem reposição (2 trevos
+            na +Milionária; 1 nos demais).
+        sorteios_por_concurso: Sorteios independentes de dezenas por concurso (2 na Dupla Sena).
+            No CSV processado cada sorteio vira uma linha, identificada pela coluna ``sorteio``.
     """
 
     slug: str
@@ -75,6 +79,8 @@ class GameSpec:
     extra_nome: str = ""
     extra_total: int = 0
     extra_ate: int | None = None
+    extra_sorteadas: int = 1
+    sorteios_por_concurso: int = 1
 
     def __post_init__(self):
         rows, cols = self.volante
@@ -90,6 +96,16 @@ class GameSpec:
     def n(self) -> int:
         """Total de dezenas do volante (N)."""
         return self.maior - self.menor + 1
+
+    @property
+    def unidade(self) -> str:
+        """O que cada linha do CSV processado representa, para textos e gráficos."""
+        return "sorteios" if self.sorteios_por_concurso > 1 else "concursos"
+
+    @property
+    def por_unidade(self) -> str:
+        """Singular de :attr:`unidade`, para rótulos como "acertos por concurso"."""
+        return self.unidade[:-1]
 
     @property
     def numbers(self) -> np.ndarray:
@@ -210,8 +226,49 @@ DIA_DE_SORTE = GameSpec(
     extra_total=12,
 )
 
+DUPLA_SENA = GameSpec(
+    slug="duplasena",
+    nome="Dupla Sena",
+    menor=1,
+    maior=50,
+    sorteadas=6,
+    aposta=6,
+    volante=(5, 10),
+    faixas=(("quadras", 4), ("quinas", 5), ("senas", 6)),
+    periodos=((2001, 2009), (2010, 2017), (2018, None)),
+    teto_salto=25,
+    sorteios_por_concurso=2,
+)
+
+MAIS_MILIONARIA = GameSpec(
+    slug="maismilionaria",
+    nome="+Milionária",
+    menor=1,
+    maior=50,
+    sorteadas=6,
+    aposta=6,
+    volante=(5, 10),
+    faixas=tuple((f"{k}_pontos", k) for k in range(2, 7)),
+    periodos=((2022, 2023), (2024, 2024), (2025, None)),
+    teto_salto=25,
+    extra="trevos",
+    extra_nome="Trevos",
+    extra_total=6,
+    extra_sorteadas=2,
+)
+
 GAMES: dict[str, GameSpec] = {
-    spec.slug: spec for spec in [MEGA_SENA, LOTOFACIL, QUINA, LOTOMANIA, TIMEMANIA, DIA_DE_SORTE]
+    spec.slug: spec
+    for spec in [
+        MEGA_SENA,
+        LOTOFACIL,
+        QUINA,
+        LOTOMANIA,
+        TIMEMANIA,
+        DIA_DE_SORTE,
+        DUPLA_SENA,
+        MAIS_MILIONARIA,
+    ]
 }
 
 

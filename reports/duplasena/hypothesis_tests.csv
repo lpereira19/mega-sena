@@ -1,0 +1,9 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 50 dezenas,54.16195430558887,49,0.2839954857055307,corrigido 44/49
+Frequência das 50 dezenas (Monte Carlo),48.63522427440633,49,0.27636181909045476,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,4.821265871546708,6,0.5669331821463961,7 categorias
+Total de dezenas por quadrante,1.190207025732256,3,0.7553540170523971,corrigido 44/49
+Dezenas em comum entre os dois sorteios do concurso,3.0012538732163105,3,0.39143189408258583,4 categorias
+"Frequência das 50 dezenas, 2001-2009",43.34182736455464,49,0.7009366657618641,pós-hoc; 1650 sorteios
+"Frequência das 50 dezenas, 2010-2017",60.24707602339181,49,0.13019614646845237,pós-hoc; 1824 sorteios
+"Frequência das 50 dezenas, 2018-2026",58.59848484848484,49,0.1637816052066169,pós-hoc; 2590 sorteios

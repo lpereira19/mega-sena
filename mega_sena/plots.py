@@ -33,7 +33,7 @@ from mega_sena.features import (
     quadrant_sizes,
 )
 from mega_sena.games import MEGA_SENA, GameSpec, get_game
-from mega_sena.hypothesis import extra_values, hypergeom_pmf
+from mega_sena.hypothesis import extra_draws, extra_values, hypergeom_pmf
 from mega_sena.modeling.backtest import expected_hits, hits_pmf
 
 app = typer.Typer()
@@ -132,7 +132,7 @@ def plot_number_frequency(
     ax.set_ylim(freq.min() * 0.85, freq.max() * 1.12)  # folga para a legenda
     ax.set_xlabel("Dezena")
     ax.set_ylabel("Vezes sorteada")
-    ax.set_title(f"Frequência de cada dezena em {n} concursos")
+    ax.set_title(f"Frequência de cada dezena em {n} {spec.unidade}")
     ax.legend(
         handles=[
             plt.Rectangle((0, 0), 1, 1, color=SERIES[1]),
@@ -335,9 +335,9 @@ def plot_even_odd(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
             textcoords="offset points",
             color=TEXT_SECONDARY,
         )
-    ax.set_xlabel("Composição do concurso (P = pares, I = ímpares)")
-    ax.set_ylabel("Proporção dos concursos")
-    ax.set_title("Pares vs. ímpares por concurso")
+    ax.set_xlabel(f"Composição do {spec.por_unidade} (P = pares, I = ímpares)")
+    ax.set_ylabel(f"Proporção dos {spec.unidade}")
+    ax.set_title(f"Pares vs. ímpares por {spec.por_unidade}")
     return fig
 
 
@@ -422,8 +422,8 @@ def plot_quadrants(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     ax_dist.set_xticks(k)
     ax_dist.yaxis.set_major_formatter(PERCENT)
     ax_dist.set_xlabel("Dezenas sorteadas no quadrante")
-    ax_dist.set_ylabel("Proporção dos concursos")
-    ax_dist.set_title("Dezenas por quadrante em cada concurso")
+    ax_dist.set_ylabel(f"Proporção dos {spec.unidade}")
+    ax_dist.set_title(f"Dezenas por quadrante em cada {spec.por_unidade}")
     ax_dist.legend(loc="upper right")
     fig.tight_layout()
     return fig
@@ -495,7 +495,7 @@ def plot_backtest(
         )
     ax_dist.set_xticks(x, labels)
     ax_dist.yaxis.set_major_formatter(PERCENT)
-    ax_dist.set_xlabel("Acertos por concurso")
+    ax_dist.set_xlabel(f"Acertos por {spec.por_unidade}")
     ax_dist.set_ylabel("Proporção das apostas")
     ax_dist.set_title("Distribuição de acertos por estratégia")
     ax_dist.legend(loc="upper right")
@@ -508,7 +508,7 @@ def plot_backtest(
         label=f"{len(null_means)} apostadores aleatórios",
     )
     ax_null.axvline(
-        expected_mean, color=REFERENCE, lw=1.5, ls="--", label=f"esperado: {expected_mean:.1f}"
+        expected_mean, color=REFERENCE, lw=1.5, ls="--", label=f"esperado: {expected_mean:.3g}"
     )
     for _, row in summary.iterrows():
         ax_null.axvline(
@@ -519,7 +519,7 @@ def plot_backtest(
             f"(p = {row['p_valor_monte_carlo']:.3f}; "
             f"Bonferroni = {row['p_valor_mc_bonferroni']:.2f})",
         )
-    ax_null.set_xlabel("Média de acertos por concurso")
+    ax_null.set_xlabel(f"Média de acertos por {spec.por_unidade}")
     ax_null.set_ylabel("Apostadores simulados")
     ax_null.set_title("Média de acertos vs. distribuição nula")
     ax_null.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncols=2, fontsize=8.5)
@@ -547,8 +547,8 @@ def plot_distances(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
         ax_pairs, *_tail_binned(pairs, pairs_pmf, start=0), reference, annotate=True
     )
     ax_pairs.set_xlabel("Pares de dezenas consecutivas no concurso (ex.: 22 e 23)")
-    ax_pairs.set_ylabel("Proporção dos concursos")
-    ax_pairs.set_title("Quantos pares consecutivos saem por concurso")
+    ax_pairs.set_ylabel(f"Proporção dos {spec.unidade}")
+    ax_pairs.set_title(f"Quantos pares consecutivos saem por {spec.por_unidade}")
 
     runs = np.bincount(distances.longest_run(draws), minlength=k + 1)[1:] / n
     runs_pmf = distances.longest_run_pmf(spec)
@@ -558,13 +558,13 @@ def plot_distances(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
         start=1,
         label=lambda v, plus: "nenhuma" if v == 1 and not plus else f"{v}{plus} seguidas",
     )
-    runs_xlabel = "Maior sequência de consecutivas no concurso"
+    runs_xlabel = f"Maior sequência de consecutivas no {spec.por_unidade}"
     if len(runs_binned[2]) > 6:  # muitas categorias (Lotofácil): rótulos curtos
         runs_binned = _tail_binned(runs, runs_pmf, start=1)
         runs_xlabel += " (1 = nenhuma)"
     _observed_vs_expected_bars(ax_runs, *runs_binned, reference, annotate=True)
     ax_runs.set_xlabel(runs_xlabel)
-    ax_runs.set_ylabel("Proporção dos concursos")
+    ax_runs.set_ylabel(f"Proporção dos {spec.unidade}")
     ax_runs.set_title("Maior sequência de dezenas seguidas")
 
     min_pmf = distances.min_gap_pmf(spec)
@@ -572,8 +572,8 @@ def plot_distances(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     _observed_vs_expected_bars(
         ax_min, *_tail_binned(smallest, min_pmf, start=1), reference, annotate=True
     )
-    ax_min.set_xlabel("Menor distância entre duas dezenas do concurso")
-    ax_min.set_ylabel("Proporção dos concursos")
+    ax_min.set_xlabel(f"Menor distância entre duas dezenas do {spec.por_unidade}")
+    ax_min.set_ylabel(f"Proporção dos {spec.unidade}")
     ax_min.set_title("Quão perto ficam as duas dezenas mais próximas")
 
     gap_cap = spec.teto_salto
@@ -617,7 +617,7 @@ def plot_neighborhood(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
         d, distances.pair_distance_pmf(spec), color=TEXT_SECONDARY, lw=2, label="esperado (acaso)"
     )
     ax_pairs.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.1%}"))
-    ax_pairs.set_xlabel("Distância entre duas dezenas do mesmo concurso")
+    ax_pairs.set_xlabel(f"Distância entre duas dezenas do mesmo {spec.por_unidade}")
     ax_pairs.set_ylabel("Proporção dos pares")
     ax_pairs.set_title("Distância entre todos os pares de dezenas")
     ax_pairs.legend(loc="upper right")
@@ -713,7 +713,7 @@ def plot_neighbor_offsets(df: pd.DataFrame, number: int, spec: GameSpec = MEGA_S
     ax.set_xlabel("Dezena que saiu junto")
     ax.set_ylabel("Concursos")
     ax.set_title(
-        f"Quando sai a {number:02d} ({times} concursos): quantas vezes cada outra saiu junto",
+        f"Quando sai a {number:02d} ({times} {spec.unidade}): quantas vezes cada outra saiu junto",
         pad=18,
     )
     ax.legend(
@@ -732,15 +732,25 @@ def plot_neighbor_offsets(df: pd.DataFrame, number: int, spec: GameSpec = MEGA_S
 
 
 def plot_extra(df: pd.DataFrame, spec: GameSpec) -> Figure:
-    """Frequência de cada opção do sorteio extra (Mês da Sorte, Time do Coração).
+    """Frequência de cada opção do sorteio extra (Mês da Sorte, Time do Coração, Trevos).
 
-    A faixa cinza é o intervalo de 95% da Binomial(n_concursos, 1/opções). Meses aparecem em
-    ordem de calendário; times, do mais ao menos sorteado. Só entram os concursos com a lista de
-    opções fixa (ver :attr:`GameSpec.extra_ate`).
+    A faixa cinza é o intervalo de 95% da Binomial(n_concursos, sorteadas/opções). Meses e
+    trevos aparecem na ordem natural; times, do mais ao menos sorteado. Só entram os concursos
+    com a lista de opções fixa (ver :attr:`GameSpec.extra_ate`).
     """
-    counts = extra_values(df, spec).value_counts()
-    n = int(counts.sum())
-    p = 1 / spec.extra_total
+    if spec.extra_sorteadas > 1:
+        draws = extra_draws(df, spec)
+        n = len(draws)
+        counts = pd.Series(
+            np.bincount(draws.ravel() - 1, minlength=spec.extra_total),
+            index=[f"{spec.extra_nome[:-1]} {i}" for i in range(1, spec.extra_total + 1)],
+        )
+        order = list(counts.index)
+    else:
+        counts = extra_values(df, spec).value_counts()
+        n = int(counts.sum())
+        order = list(MONTHS) if spec.extra == "mes_da_sorte" else None
+    p = spec.extra_sorteadas / spec.extra_total
     expected = n * p
     half_band = 1.96 * np.sqrt(n * p * (1 - p))
     outside = (counts - expected).abs() > half_band
@@ -753,13 +763,14 @@ def plot_extra(df: pd.DataFrame, spec: GameSpec) -> Figure:
     ]
     labels = ["fora da faixa de 95%", "dentro da faixa"]
 
-    if spec.extra == "mes_da_sorte":
-        counts = counts.reindex(MONTHS, fill_value=0)
-        outside = outside.reindex(MONTHS, fill_value=True)
+    if order is not None:  # opções com ordem natural: barras verticais
+        counts = counts.reindex(order, fill_value=0)
+        outside = outside.reindex(order, fill_value=True)
         colors = [SERIES[1] if out else SERIES[0] for out in outside]
-        fig, ax = plt.subplots(figsize=(12, 5))
+        names = [month[:3] for month in order] if spec.extra == "mes_da_sorte" else order
+        fig, ax = plt.subplots(figsize=(12 if len(order) > 6 else 9, 5))
         ax.axhspan(expected - half_band, expected + half_band, color=REFERENCE, alpha=0.15, lw=0)
-        ax.bar([month[:3] for month in counts.index], counts.values, color=colors, width=0.75)
+        ax.bar(names, counts.values, color=colors, width=0.75)
         ax.axhline(expected, color=REFERENCE, lw=1.5, ls="--")
         for i, value in enumerate(counts.values):
             ax.annotate(

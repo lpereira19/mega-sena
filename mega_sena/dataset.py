@@ -301,39 +301,72 @@ def normalize_extra(value: object, spec: GameSpec) -> str | None:
     raise ValueError(f"Mês da Sorte desconhecido: {value!r}.")
 
 
-def parse_contest(record: dict, spec: GameSpec = MEGA_SENA) -> dict:
-    """Converte o JSON bruto de um concurso em um registro tabular plano.
+def _extra_value(record: dict, spec: GameSpec) -> str | None:
+    """Resultado do sorteio extra de um concurso, já padronizado.
+
+    Os trevos da +Milionária viram um texto com os dois números em ordem (``"2-4"``).
+    """
+    if spec.extra == "trevos":
+        trevos = sorted(int(t) for t in record.get("trevosSorteados") or [])
+        return "-".join(map(str, trevos)) if trevos else None
+    return normalize_extra(record.get("nomeTimeCoracaoMesSorte"), spec)
+
+
+def _second_draw_jackpot_tier(record: dict) -> int | None:
+    """Faixa do prêmio máximo do 2º sorteio da Dupla Sena.
+
+    A API lista as faixas dos dois sorteios em sequência (``6 acertos``, ``5 acertos``... e de
+    novo ``6 acertos``...). A numeração muda conforme a época (a faixa de 3 acertos nem sempre
+    existiu), então a faixa certa é a segunda com a mesma descrição da faixa 1.
+    """
+    tiers = sorted(record.get("listaRateioPremio") or [], key=lambda t: t.get("faixa", 0))
+    top = next((t.get("descricaoFaixa") for t in tiers if t.get("faixa") == 1), None)
+    same = [t["faixa"] for t in tiers if t.get("faixa") != 1 and t.get("descricaoFaixa") == top]
+    return same[0] if top and same else None
+
+
+def parse_contest(record: dict, spec: GameSpec = MEGA_SENA, sorteio: int = 1) -> dict:
+    """Converte o JSON bruto de um concurso (ou de um dos sorteios dele) em um registro plano.
 
     Args:
         record: Resposta da API para um concurso.
         spec: Jogo do concurso.
+        sorteio: Qual sorteio do concurso ler (1 ou 2; o 2º só existe na Dupla Sena).
 
     Returns:
-        Dicionário com ``concurso``, ``data``, as dezenas em ordem crescente (``d1``..``dK``),
-        as dezenas na ordem de sorteio (``bola1``..``bolaK``), o sorteio extra do jogo (se
-        houver, na coluna :attr:`GameSpec.extra`), o número de ganhadores do prêmio máximo, se
-        o prêmio acumulou e o valor arrecadado.
+        Dicionário com ``concurso`` (e ``sorteio``, nos jogos com dois sorteios), ``data``, as
+        dezenas em ordem crescente (``d1``..``dK``), as dezenas na ordem de sorteio
+        (``bola1``..``bolaK``), o sorteio extra do jogo (se houver, na coluna
+        :attr:`GameSpec.extra`), o número de ganhadores do prêmio máximo, se o prêmio acumulou
+        e o valor arrecadado.
     """
-    sorted_numbers = sorted(int(n) for n in record["listaDezenas"])
+    k = spec.sorteadas
+    field = "listaDezenas" if sorteio == 1 else "listaDezenasSegundoSorteio"
+    sorted_numbers = sorted(int(n) for n in record[field])
+    # A lista na ordem de sorteio traz tudo em sequência: o 1º sorteio, depois o 2º (Dupla
+    # Sena) ou os trevos (+Milionária).
     draw_order = [int(n) for n in record.get("dezenasSorteadasOrdemSorteio") or []]
+    draw_order = draw_order[(sorteio - 1) * k : sorteio * k]
+    jackpot_tier = 1 if sorteio == 1 else _second_draw_jackpot_tier(record)
     jackpot = next(
-        (tier for tier in record.get("listaRateioPremio") or [] if tier.get("faixa") == 1), {}
-    )
-    extra = (
-        {spec.extra: normalize_extra(record.get("nomeTimeCoracaoMesSorte"), spec)}
-        if spec.extra
-        else {}
+        (t for t in record.get("listaRateioPremio") or [] if t.get("faixa") == jackpot_tier), {}
     )
     return {
         "concurso": int(record["numero"]),
+        **({"sorteio": sorteio} if spec.sorteios_por_concurso > 1 else {}),
         "data": pd.to_datetime(record["dataApuracao"], format="%d/%m/%Y"),
         **dict(zip(spec.draw_columns, sorted_numbers)),
-        **dict(zip(spec.order_columns, draw_order[: spec.sorteadas] or sorted_numbers)),
-        **extra,
+        **dict(zip(spec.order_columns, draw_order or sorted_numbers)),
+        **({spec.extra: _extra_value(record, spec)} if spec.extra else {}),
         "ganhadores_premio_maximo": int(jackpot.get("numeroDeGanhadores", 0)),
         "acumulado": bool(record.get("acumulado")),
         "valor_arrecadado": float(record.get("valorArrecadado") or 0.0),
     }
+
+
+def _keys(df: pd.DataFrame) -> list[str]:
+    """Colunas que identificam uma linha: o concurso e, na Dupla Sena, o sorteio."""
+    return ["concurso", "sorteio"] if "sorteio" in df.columns else ["concurso"]
 
 
 def validate_results(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> None:
@@ -344,8 +377,8 @@ def validate_results(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> None:
             dentro de um concurso.
     """
     draws = df[spec.draw_columns].to_numpy()
-    if df["concurso"].duplicated().any():
-        raise ValueError("Há concursos duplicados.")
+    if df[_keys(df)].duplicated().any():
+        raise ValueError("Há concursos (ou sorteios) duplicados.")
     if ((draws < spec.menor) | (draws > spec.maior)).any():
         raise ValueError(f"Há dezenas fora do intervalo {spec.menor}..{spec.maior}.")
     if (pd.DataFrame(draws).nunique(axis=1) != spec.sorteadas).any():
@@ -364,14 +397,17 @@ def build_dataframe(records: list[dict], spec: GameSpec = MEGA_SENA) -> pd.DataF
         spec: Jogo dos registros.
 
     Returns:
-        Um concurso por linha, ordenado pelo número do concurso.
+        Um concurso por linha (na Dupla Sena, um sorteio por linha, com a coluna ``sorteio``),
+        ordenado pelo número do concurso.
     """
-    df = (
-        pd.DataFrame([parse_contest(record, spec) for record in records])
-        .drop_duplicates("concurso", keep="last")
-        .sort_values("concurso")
-        .reset_index(drop=True)
-    )
+    rows = [
+        parse_contest(record, spec, sorteio)
+        for record in records
+        for sorteio in range(1, spec.sorteios_por_concurso + 1)
+    ]
+    df = pd.DataFrame(rows)
+    keys = _keys(df)
+    df = df.drop_duplicates(keys, keep="last").sort_values(keys).reset_index(drop=True)
     if spec.extra == "time_do_coracao":
         df[spec.extra] = resolve_teams(df[spec.extra])
     validate_results(df, spec)

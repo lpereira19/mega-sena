@@ -6,10 +6,29 @@ import pandas as pd
 import pytest
 
 from mega_sena import distances
-from mega_sena.dataset import MONTHS, build_dataframe, normalize_extra, resolve_teams
+from mega_sena.dataset import (
+    MONTHS,
+    build_dataframe,
+    normalize_extra,
+    parse_contest,
+    resolve_teams,
+)
 from mega_sena.features import quadrant_of, quadrant_sizes
-from mega_sena.games import DIA_DE_SORTE, GAMES, TIMEMANIA, GameSpec
-from mega_sena.hypothesis import extra_test, random_draws
+from mega_sena.games import (
+    DIA_DE_SORTE,
+    DUPLA_SENA,
+    GAMES,
+    MAIS_MILIONARIA,
+    TIMEMANIA,
+    GameSpec,
+)
+from mega_sena.hypothesis import (
+    extra_as_game,
+    extra_combination_tests,
+    extra_test,
+    overlap_test,
+    random_draws,
+)
 from mega_sena.modeling.backtest import hits_pmf
 from mega_sena.plots import plot_extra, plot_quadrants
 
@@ -151,3 +170,86 @@ def test_extra_test_only_uses_the_fixed_list_window():
     result = extra_test(df, spec)
     assert result.p_valor == pytest.approx(1.0)
     assert "concursos até 40" in result.observacao
+
+
+def test_parse_mais_milionaria_separates_numbers_and_trevos():
+    record = {
+        "numero": 1,
+        "dataApuracao": "28/05/2022",
+        "listaDezenas": ["01", "03", "07", "15", "23", "44"],
+        "trevosSorteados": ["4", "2"],
+        "dezenasSorteadasOrdemSorteio": ["23", "44", "01", "07", "03", "15", "04", "02"],
+    }
+    row = parse_contest(record, MAIS_MILIONARIA)
+    assert row["trevos"] == "2-4"
+    assert [row[f"bola{i}"] for i in range(1, 7)] == [23, 44, 1, 7, 3, 15]
+
+
+def _fake_trevos(n: int, seed: int) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    pairs = np.sort(random_draws(n, rng, extra_as_game(MAIS_MILIONARIA)), axis=1)
+    return pd.DataFrame({"concurso": range(1, n + 1), "trevos": [f"{a}-{b}" for a, b in pairs]})
+
+
+def test_trevo_tests_are_calibrated():
+    p_values = np.array(
+        [[r.p_valor for r in extra_combination_tests(_fake_trevos(300, s), MAIS_MILIONARIA)]
+         for s in range(300)]
+    )
+    rejection = (p_values < 0.05).mean(axis=0)
+    assert ((0.02 < rejection) & (rejection < 0.09)).all()
+
+
+def test_trevo_combination_test_sees_dependence_the_marginals_miss():
+    # Só os pares 1-2, 3-4 e 5-6: cada trevo sai exatamente 1/3 das vezes (marginais perfeitas),
+    # mas as combinações estão longe de uniformes.
+    df = pd.DataFrame({"concurso": range(1, 301), "trevos": ["1-2", "3-4", "5-6"] * 100})
+    by_option, by_combo = extra_combination_tests(df, MAIS_MILIONARIA)
+    assert by_option.p_valor > 0.99
+    assert by_combo.p_valor < 1e-10
+
+
+def _fake_dupla(n: int, seed: int, copy_first: bool = False) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    first = np.sort(random_draws(n, rng, DUPLA_SENA), axis=1)
+    second = first if copy_first else np.sort(random_draws(n, rng, DUPLA_SENA), axis=1)
+    rows = [
+        {"concurso": c, "sorteio": s, **dict(zip(DUPLA_SENA.draw_columns, draws[c - 1]))}
+        for c in range(1, n + 1)
+        for s, draws in [(1, first), (2, second)]
+    ]
+    return pd.DataFrame(rows)
+
+
+def test_overlap_test_is_calibrated_and_detects_dependence():
+    p_values = [overlap_test(_fake_dupla(400, s), DUPLA_SENA).p_valor for s in range(300)]
+    assert 0.02 < np.mean(np.array(p_values) < 0.05) < 0.09
+    assert overlap_test(_fake_dupla(100, 0, copy_first=True), DUPLA_SENA).p_valor < 1e-10
+
+
+def _dupla_record(numero: int, tiers: list[tuple[int, str, int]]) -> dict:
+    return {
+        "numero": numero,
+        "dataApuracao": "09/04/2016",
+        "listaDezenas": ["12", "14", "22", "33", "36", "50"],
+        "listaDezenasSegundoSorteio": ["18", "20", "29", "32", "41", "49"],
+        "dezenasSorteadasOrdemSorteio": [
+            "22", "36", "33", "12", "14", "50", "20", "49", "18", "32", "29", "41",
+        ],
+        "listaRateioPremio": [
+            {"faixa": f, "descricaoFaixa": d, "numeroDeGanhadores": g} for f, d, g in tiers
+        ],
+    }
+
+
+def test_dupla_sena_has_one_row_per_draw_and_finds_the_second_jackpot():
+    # Sem a faixa de 3 acertos, a sena do 2º sorteio é a faixa 5; com ela, também, mas a busca
+    # é pela descrição, não pelo número.
+    tiers = [(1, "6 acertos", 0), (2, "5 acertos", 26), (3, "4 acertos", 1930),
+             (5, "6 acertos", 2), (6, "5 acertos", 27), (7, "4 acertos", 1449)]
+    df = build_dataframe([_dupla_record(1, tiers), _dupla_record(2, tiers)], DUPLA_SENA)
+    assert df[["concurso", "sorteio"]].values.tolist() == [[1, 1], [1, 2], [2, 1], [2, 2]]
+    first, second = df.iloc[0], df.iloc[1]
+    assert [first[f"d{i}"] for i in range(1, 7)] == [12, 14, 22, 33, 36, 50]
+    assert [second[f"bola{i}"] for i in range(1, 7)] == [20, 49, 18, 32, 29, 41]
+    assert (first["ganhadores_premio_maximo"], second["ganhadores_premio_maximo"]) == (0, 2)
