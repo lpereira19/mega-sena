@@ -21,7 +21,7 @@ Uso::
     python -m mega_sena.hypothesis   # grava reports/<jogo>/hypothesis_tests.csv
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from loguru import logger
 import numpy as np
@@ -48,6 +48,7 @@ FREQUENCY_TEST = "Frequência das {n} dezenas"
 FREQUENCY_MC_TEST = "Frequência das {n} dezenas (Monte Carlo)"
 EVEN_ODD_TEST = "Pares por concurso vs. hipergeométrica"
 QUADRANT_TEST = "Total de dezenas por quadrante"
+EXTRA_TEST = "{extra}: frequência das opções"
 
 
 @dataclass(frozen=True)
@@ -249,13 +250,51 @@ def frequency_tests_by_period(
     return results
 
 
+def extra_values(df: pd.DataFrame, spec: GameSpec) -> pd.Series:
+    """Resultados do sorteio extra no trecho em que a lista de opções foi fixa.
+
+    Usa os concursos até :attr:`GameSpec.extra_ate` (todos, se for ``None``), sem os vazios.
+    """
+    window = df if spec.extra_ate is None else df[df["concurso"] <= spec.extra_ate]
+    return window[spec.extra].dropna()
+
+
+def extra_test(df: pd.DataFrame, spec: GameSpec) -> TestResult:
+    """Qui-quadrado de uniformidade do sorteio extra (Mês da Sorte, Time do Coração).
+
+    Sob H0 cada uma das ``spec.extra_total`` opções tem a mesma chance em todo concurso. Como
+    sai uma opção só por concurso, não há dependência entre categorias e o qui-quadrado comum
+    vale sem correção. Opções que nunca saíram entram com contagem zero. Só entram os concursos
+    com a lista de opções fixa (ver :func:`extra_values`).
+
+    Raises:
+        ValueError: Se o histórico tiver mais opções distintas do que o jogo oferece (por
+            exemplo, um time renomeado contado duas vezes).
+    """
+    values = extra_values(df, spec)
+    counts = values.value_counts()
+    if len(counts) > spec.extra_total:
+        raise ValueError(
+            f"{spec.extra_nome}: {len(counts)} opções distintas no histórico, mais que as "
+            f"{spec.extra_total} do jogo. Confira a padronização em dataset.normalize_extra."
+        )
+    observed = np.zeros(spec.extra_total)
+    observed[: len(counts)] = counts.to_numpy()
+    uniform = np.full(spec.extra_total, 1 / spec.extra_total)
+    result = pmf_test(observed, uniform, EXTRA_TEST.format(extra=spec.extra_nome))
+    if spec.extra_ate is not None:
+        result = replace(result, observacao=f"{result.observacao}; concursos até {spec.extra_ate}")
+    return result
+
+
 def run_all_tests(
     df: pd.DataFrame, n_sims: int = 2000, seed: int = RANDOM_SEED, spec: GameSpec = MEGA_SENA
 ) -> pd.DataFrame:
     """Executa a bateria de testes de hipótese sobre o histórico.
 
-    Os quatro primeiros testes são os confirmatórios, definidos antes de olhar os dados; as
-    linhas por período são exploratórias (ver :func:`frequency_tests_by_period`).
+    Os quatro primeiros testes (mais o do sorteio extra, nos jogos que têm) são os
+    confirmatórios, definidos antes de olhar os dados; as linhas por período são exploratórias
+    (ver :func:`frequency_tests_by_period`).
 
     Returns:
         Uma linha por teste. P-valores altos significam que não há evidência contra H0.
@@ -275,6 +314,7 @@ def run_all_tests(
         monte_carlo_frequency_test(draws, n_sims, seed, spec),
         distribution_test(evens_k, even_count(spec), EVEN_ODD_TEST, spec=spec),
         category_totals_test(quadrant_totals, sizes, n_contests, QUADRANT_TEST, spec),
+        *([extra_test(df, spec)] if spec.extra else []),
         *frequency_tests_by_period(df, spec=spec),
     ]
     return pd.DataFrame([asdict(result) for result in results])

@@ -44,11 +44,21 @@ class GameSpec:
         maior: Maior dezena do volante.
         sorteadas: Dezenas sorteadas por concurso (K).
         aposta: Dezenas marcadas na aposta mínima (B), usada no backtest.
-        volante: Layout do volante impresso, ``(linhas, colunas)``, usado nos quadrantes.
+        volante: Layout do volante, ``(linhas, colunas)``, usado nos quadrantes. As dezenas
+            preenchem a grade linha a linha; a última linha pode ficar incompleta (Dia de Sorte,
+            31 dezenas numa grade de calendário com 7 colunas).
         faixas: Faixas de prêmio contadas no backtest, como ``(coluna, acertos)``.
         periodos: Janelas de anos da análise exploratória por período (``None`` no fim = até o
             ano mais recente).
         teto_salto: Saltos entre dezenas vizinhas a partir deste valor ficam numa categoria só.
+        extra: Coluna do sorteio extra no CSV processado (``"mes_da_sorte"`` no Dia de Sorte,
+            ``"time_do_coracao"`` na Timemania), ou ``None`` se o jogo não tem.
+        extra_nome: Nome do sorteio extra para exibição.
+        extra_total: Quantas opções o sorteio extra tem (12 meses, 80 times).
+        extra_ate: Último concurso em que a lista de opções do sorteio extra foi fixa, ou
+            ``None`` se nunca mudou. O teste e a figura do sorteio extra usam só os concursos
+            até aqui: depois, a Timemania passou a trocar clubes da lista, e sem saber quais
+            valiam em cada concurso não dá para calcular a frequência esperada.
     """
 
     slug: str
@@ -61,11 +71,15 @@ class GameSpec:
     faixas: tuple[tuple[str, int], ...] = ()
     periodos: tuple[tuple[int, int | None], ...] = ()
     teto_salto: int = 25
+    extra: str | None = None
+    extra_nome: str = ""
+    extra_total: int = 0
+    extra_ate: int | None = None
 
     def __post_init__(self):
         rows, cols = self.volante
-        if rows * cols != self.n:
-            raise ValueError(f"{self.nome}: volante {rows}x{cols} não tem {self.n} dezenas.")
+        if not (rows - 1) * cols < self.n <= rows * cols:
+            raise ValueError(f"{self.nome}: volante {rows}x{cols} não comporta {self.n} dezenas.")
         if self.aposta < self.sorteadas:
             raise ValueError(f"{self.nome}: a aposta precisa ter pelo menos {self.sorteadas}.")
         max_gap = self.n - self.sorteadas + 1
@@ -124,7 +138,81 @@ MEGA_SENA = GameSpec(
     teto_salto=25,
 )
 
-GAMES: dict[str, GameSpec] = {spec.slug: spec for spec in [MEGA_SENA]}
+LOTOFACIL = GameSpec(
+    slug="lotofacil",
+    nome="Lotofácil",
+    menor=1,
+    maior=25,
+    sorteadas=15,
+    aposta=15,
+    volante=(5, 5),
+    faixas=tuple((f"{k}_pontos", k) for k in range(11, 16)),
+    periodos=((2003, 2012), (2013, 2019), (2020, None)),
+    teto_salto=6,
+)
+
+QUINA = GameSpec(
+    slug="quina",
+    nome="Quina",
+    menor=1,
+    maior=80,
+    sorteadas=5,
+    aposta=5,
+    volante=(8, 10),
+    faixas=(("duques", 2), ("ternos", 3), ("quadras", 4), ("quinas", 5)),
+    periodos=((1994, 2005), (2006, 2015), (2016, None)),
+    teto_salto=40,
+)
+
+LOTOMANIA = GameSpec(
+    slug="lotomania",
+    nome="Lotomania",
+    menor=0,
+    maior=99,
+    sorteadas=20,
+    aposta=50,
+    volante=(10, 10),
+    faixas=(("0_pontos", 0), *((f"{k}_pontos", k) for k in range(15, 21))),
+    periodos=((1999, 2009), (2010, 2017), (2018, None)),
+    teto_salto=20,
+)
+
+TIMEMANIA = GameSpec(
+    slug="timemania",
+    nome="Timemania",
+    menor=1,
+    maior=80,
+    sorteadas=7,
+    aposta=10,
+    volante=(8, 10),
+    faixas=tuple((f"{k}_pontos", k) for k in range(3, 8)),
+    periodos=((2008, 2013), (2014, 2019), (2020, None)),
+    teto_salto=35,
+    extra="time_do_coracao",
+    extra_nome="Time do Coração",
+    extra_total=80,
+    extra_ate=1781,  # a partir do concurso 1782 (12/05/2022) a lista de clubes mudou
+)
+
+DIA_DE_SORTE = GameSpec(
+    slug="diadesorte",
+    nome="Dia de Sorte",
+    menor=1,
+    maior=31,
+    sorteadas=7,
+    aposta=7,
+    volante=(5, 7),
+    faixas=tuple((f"{k}_pontos", k) for k in range(4, 8)),
+    periodos=((2018, 2020), (2021, 2023), (2024, None)),
+    teto_salto=15,
+    extra="mes_da_sorte",
+    extra_nome="Mês da Sorte",
+    extra_total=12,
+)
+
+GAMES: dict[str, GameSpec] = {
+    spec.slug: spec for spec in [MEGA_SENA, LOTOFACIL, QUINA, LOTOMANIA, TIMEMANIA, DIA_DE_SORTE]
+}
 
 
 def get_game(slug: str) -> GameSpec:

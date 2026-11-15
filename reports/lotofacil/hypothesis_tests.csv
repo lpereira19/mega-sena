@@ -1,0 +1,8 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 25 dezenas,56.83154870723426,24,0.0001763995621871551,corrigido 10/24
+Frequência das 25 dezenas (Monte Carlo),23.67981196134761,24,0.0014992503748125937,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,2.8869978056406023,7,0.8952553091521571,8 categorias
+Total de dezenas por quadrante,7.546211659557237,3,0.05638289017545537,corrigido 10/24
+"Frequência das 25 dezenas, 2003-2012",30.228504122497057,24,0.1772933211332918,pós-hoc; 849 concursos
+"Frequência das 25 dezenas, 2013-2019",27.038642789820926,24,0.3026551152352109,pós-hoc; 1061 concursos
+"Frequência das 25 dezenas, 2020-2026",52.62324127149556,24,0.0006484371241098079,pós-hoc; 1919 concursos

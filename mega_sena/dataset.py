@@ -25,6 +25,7 @@ from pathlib import Path
 import re
 import threading
 import time
+import unicodedata
 
 from loguru import logger
 import pandas as pd
@@ -37,6 +38,39 @@ from urllib3.util.retry import Retry
 from mega_sena.games import MEGA_SENA, GameSpec, get_game
 
 app = typer.Typer()
+
+#: Nomes canônicos do Mês da Sorte (Dia de Sorte).
+MONTHS = (
+    "Janeiro",
+    "Fevereiro",
+    "Março",
+    "Abril",
+    "Maio",
+    "Junho",
+    "Julho",
+    "Agosto",
+    "Setembro",
+    "Outubro",
+    "Novembro",
+    "Dezembro",
+)
+
+#: Grafias diferentes do mesmo clube na Timemania, já sem acentos: (nome, UF) -> nome canônico.
+TEAM_ALIASES = {
+    ("A B C", "RN"): "ABC",
+    ("MOTO CLUB", "MA"): "MOTO CLUBE",
+    ("SAMP CORREA", "MA"): "SAMPAIO CORREA",
+    ("P DESPORTOS", "SP"): "PORTUGUESA DESPORTOS",
+    ("PORT DESPORT", "SP"): "PORTUGUESA DESPORTOS",
+    ("S PAULO", "SP"): "SAO PAULO",
+    ("S RAIMUNDO", "AM"): "SAO RAIMUNDO",
+    ("SAORAIMUNDO", "RR"): "SAO RAIMUNDO",
+    ("UNIAO S JOAO", "SP"): "UNIAO SAO JOAO",
+    ("BRASIL", "RS"): "BRASIL DE PELOTAS",
+    ("RB BRAGANTINO", "SP"): "BRAGANTINO",
+    ("VILA NOVA", "MG"): "VILLA NOVA",
+    ("CONFIANCA SAF", "SE"): "CONFIANCA",
+}
 
 _thread_local = threading.local()
 
@@ -183,6 +217,90 @@ def load_results_file(path: Path, spec: GameSpec = MEGA_SENA) -> pd.DataFrame:
 # ---------------------------------------------------------------------------------------------
 
 
+def _fold(text: str) -> str:
+    """Remove acentos e caixa, para comparar nomes escritos de jeitos diferentes."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
+
+
+def _split_team(raw: str) -> tuple[str, str, bool]:
+    """Separa ``"NOME/UF"`` em nome sem acentos, UF e se o registro veio corrompido.
+
+    Alguns concursos trazem o nome seguido de restos de outro texto e bytes nulos (ex.:
+    ``"BAHIACANOEABA"``, quatro nulos e ``"/BA"``); nesses, o nome devolvido é o trecho antes
+    dos nulos, ainda com o lixo no fim (resolvido em :func:`resolve_teams`).
+    """
+    name, _, uf = raw.rpartition("/")
+    corrupted = "\x00" in name
+    name = _fold(name.split("\x00")[0]).upper().replace(".", " ")
+    return " ".join(name.split()), uf.strip().upper(), corrupted
+
+
+def resolve_teams(values: pd.Series) -> pd.Series:
+    """Padroniza os nomes do Time do Coração ao longo de todo o histórico.
+
+    1. Remove acentos, pontos e espaços sobrando (``"AVAÍ/SC"`` e ``"AVAI /SC"`` viram
+       ``"AVAI/SC"``).
+    2. Registros corrompidos (nome + lixo + bytes nulos) recebem o nome mais longo, entre os
+       que aparecem limpos no histórico com a mesma UF, que é prefixo do trecho legível.
+    3. Grafias alternativas do mesmo clube são unificadas por :data:`TEAM_ALIASES`.
+
+    Returns:
+        Série com ``"NOME/UF"`` padronizado (``None`` onde não houver time ou onde um registro
+        corrompido não puder ser atribuído).
+    """
+    parts = values.map(lambda v: _split_team(v) if isinstance(v, str) else None)
+    known: dict[str, set[str]] = {}
+    for part in parts.dropna():
+        name, uf, corrupted = part
+        if not corrupted:
+            known.setdefault(uf, set()).add(name)
+
+    def resolve(part: tuple[str, str, bool] | None) -> str | None:
+        if part is None:
+            return None
+        name, uf, corrupted = part
+        if corrupted:
+            candidates = [k for k in known.get(uf, ()) if name.startswith(k)]
+            if not candidates:
+                return None
+            name = max(candidates, key=len)
+        return f"{TEAM_ALIASES.get((name, uf), name)}/{uf}"
+
+    resolved = parts.map(resolve)
+    lost = resolved.isna() & values.notna()
+    if lost.any():
+        logger.warning(f"{lost.sum()} registros do Time do Coração não puderam ser atribuídos.")
+    return resolved
+
+
+def normalize_extra(value: object, spec: GameSpec) -> str | None:
+    """Padroniza o resultado do sorteio extra (Mês da Sorte ou Time do Coração).
+
+    A API não é consistente ao longo do histórico: o Mês da Sorte vem como número (``"2"``) nos
+    primeiros concursos e por extenso depois, e o Time do Coração vem com espaços sobrando. Os
+    times só são padronizados de vez em :func:`resolve_teams`, que precisa do histórico todo.
+
+    Returns:
+        O nome canônico do mês (como em :data:`MONTHS`) ou o time sem espaços duplicados, ou
+        ``None`` se o campo vier vazio.
+
+    Raises:
+        ValueError: Se o mês não for reconhecido.
+    """
+    text = " ".join(str(value or "").split())
+    if not text:
+        return None
+    if spec.extra != "mes_da_sorte":
+        return text
+    if text.isdigit() and 1 <= int(text) <= len(MONTHS):
+        return MONTHS[int(text) - 1]
+    for month in MONTHS:
+        if _fold(month) == _fold(text):
+            return month
+    raise ValueError(f"Mês da Sorte desconhecido: {value!r}.")
+
+
 def parse_contest(record: dict, spec: GameSpec = MEGA_SENA) -> dict:
     """Converte o JSON bruto de um concurso em um registro tabular plano.
 
@@ -192,19 +310,26 @@ def parse_contest(record: dict, spec: GameSpec = MEGA_SENA) -> dict:
 
     Returns:
         Dicionário com ``concurso``, ``data``, as dezenas em ordem crescente (``d1``..``dK``),
-        as dezenas na ordem de sorteio (``bola1``..``bolaK``), o número de ganhadores do prêmio
-        máximo, se o prêmio acumulou e o valor arrecadado.
+        as dezenas na ordem de sorteio (``bola1``..``bolaK``), o sorteio extra do jogo (se
+        houver, na coluna :attr:`GameSpec.extra`), o número de ganhadores do prêmio máximo, se
+        o prêmio acumulou e o valor arrecadado.
     """
     sorted_numbers = sorted(int(n) for n in record["listaDezenas"])
     draw_order = [int(n) for n in record.get("dezenasSorteadasOrdemSorteio") or []]
     jackpot = next(
         (tier for tier in record.get("listaRateioPremio") or [] if tier.get("faixa") == 1), {}
     )
+    extra = (
+        {spec.extra: normalize_extra(record.get("nomeTimeCoracaoMesSorte"), spec)}
+        if spec.extra
+        else {}
+    )
     return {
         "concurso": int(record["numero"]),
         "data": pd.to_datetime(record["dataApuracao"], format="%d/%m/%Y"),
         **dict(zip(spec.draw_columns, sorted_numbers)),
         **dict(zip(spec.order_columns, draw_order[: spec.sorteadas] or sorted_numbers)),
+        **extra,
         "ganhadores_premio_maximo": int(jackpot.get("numeroDeGanhadores", 0)),
         "acumulado": bool(record.get("acumulado")),
         "valor_arrecadado": float(record.get("valorArrecadado") or 0.0),
@@ -247,6 +372,8 @@ def build_dataframe(records: list[dict], spec: GameSpec = MEGA_SENA) -> pd.DataF
         .sort_values("concurso")
         .reset_index(drop=True)
     )
+    if spec.extra == "time_do_coracao":
+        df[spec.extra] = resolve_teams(df[spec.extra])
     validate_results(df, spec)
     return df
 

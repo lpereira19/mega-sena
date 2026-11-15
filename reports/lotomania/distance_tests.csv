@@ -1,0 +1,7 @@
+teste,estatistica,graus_liberdade,p_valor,observacao,p_valor_bonferroni
+Pares consecutivos por concurso,5.980096617983194,9,0.7419086476759968,10 categorias,1.0
+Maior sequência de consecutivas por concurso,4.183920768301947,5,0.5232513057969114,6 categorias,1.0
+Menor distância por concurso,0.6992525357433055,1,0.40303496708950104,2 categorias,1.0
+Saltos entre dezenas vizinhas (Monte Carlo),30.955924377321317,19,0.028985507246376812,2000 simulações,0.17391304347826086
+Distância entre todos os pares (Monte Carlo),84.63254101974795,98,0.18040979510244878,2000 simulações,1.0
+Vizinha mais próxima de cada dezena (Monte Carlo),97.70449915351678,100,0.5582208895552224,2000 simulações,1.0

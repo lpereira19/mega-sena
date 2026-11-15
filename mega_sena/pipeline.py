@@ -13,7 +13,8 @@ Roda em sequência:
 Uso::
 
     python -m mega_sena.pipeline                  # atualização completa da Mega-Sena
-    python -m mega_sena.pipeline --jogo megasena  # escolhe o jogo
+    python -m mega_sena.pipeline --jogo lotofacil # escolhe o jogo
+    python -m mega_sena.pipeline --jogo todos     # todos os jogos registrados
     python -m mega_sena.pipeline --skip-download  # só reprocessa os dados já baixados
 """
 
@@ -27,7 +28,7 @@ import typer
 
 from mega_sena import dataset, distances, features, hypothesis, plots, report
 from mega_sena.config import PROJ_ROOT, RANDOM_SEED
-from mega_sena.games import MEGA_SENA, GameSpec, get_game
+from mega_sena.games import GAMES, MEGA_SENA, GameSpec, get_game
 from mega_sena.modeling import backtest
 
 app = typer.Typer()
@@ -94,7 +95,7 @@ def run(
 
 @app.command()
 def main(
-    jogo: str = typer.Option(MEGA_SENA.slug, help="Jogo (slug da API)."),
+    jogo: str = typer.Option(MEGA_SENA.slug, help="Jogo (slug da API) ou 'todos'."),
     skip_download: bool = typer.Option(
         False, help="Não consulta a API; usa os dados já baixados."
     ),
@@ -103,7 +104,9 @@ def main(
     seed: int = RANDOM_SEED,
 ):
     """Atualiza dados, análises, figuras, README e notebook."""
-    run(get_game(jogo), skip_download, run_notebook, n_sims, seed)
+    specs = list(GAMES.values()) if jogo == "todos" else [get_game(jogo)]
+    for spec in specs:
+        run(spec, skip_download, run_notebook, n_sims, seed)
 
 
 if __name__ == "__main__":

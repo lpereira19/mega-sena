@@ -1,0 +1,9 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 80 dezenas,77.67409730160227,79,0.5211084235825137,corrigido 73/79
+Frequência das 80 dezenas (Monte Carlo),71.77479877236667,79,0.5157421289355323,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,3.235545623857095,7,0.8623910865692008,8 categorias
+Total de dezenas por quadrante,1.6666217158468295,3,0.644379867118724,corrigido 73/79
+Time do Coração: frequência das opções,67.71420550252665,79,0.8134915189942954,80 categorias; concursos até 1781
+"Frequência das 80 dezenas, 2008-2013",104.64791541765172,79,0.028349878914895682,pós-hoc; 519 concursos
+"Frequência das 80 dezenas, 2014-2019",88.83193988051185,79,0.21056909155993492,pós-hoc; 907 concursos
+"Frequência das 80 dezenas, 2020-2026",58.88581655077252,79,0.9560263741183987,pós-hoc; 1041 concursos

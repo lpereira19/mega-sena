@@ -1,0 +1,9 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 31 dezenas,32.75479902428677,30,0.3332815863520393,corrigido 24/30
+Frequência das 31 dezenas (Monte Carlo),26.20383921942942,30,0.3288355822088955,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,3.453173986899726,6,0.7501889135005649,7 categorias
+Total de dezenas por quadrante,0.9497847951355695,3,0.8133999475971065,corrigido 24/30
+Mês da Sorte: frequência das opções,9.46325167037862,11,0.579212706073087,12 categorias
+"Frequência das 31 dezenas, 2018-2020",28.0468471677948,30,0.5679540833309014,pós-hoc; 401 concursos
+"Frequência das 31 dezenas, 2021-2023",36.01177394034538,30,0.20769213819342444,pós-hoc; 455 concursos
+"Frequência das 31 dezenas, 2024-2026",21.84390456793715,30,0.859661538902019,pós-hoc; 491 concursos

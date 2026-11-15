@@ -312,22 +312,29 @@ def run_distance_tests(
     """
     draws = draws_matrix(df)
     k = spec.sorteadas
-    results = [
-        pmf_test(
+    per_contest = [
+        (
             np.bincount(consecutive_pairs(draws), minlength=k),
             consecutive_pairs_pmf(spec),
             CONSECUTIVE_TEST,
         ),
-        pmf_test(
+        (
             np.bincount(longest_run(draws), minlength=k + 1)[1:],
             longest_run_pmf(spec),
             LONGEST_RUN_TEST,
         ),
-        pmf_test(
+        (
             np.bincount(min_gap(draws), minlength=len(min_gap_pmf(spec)) + 1)[1:],
             min_gap_pmf(spec),
             MIN_GAP_TEST,
         ),
+    ]
+    # Métricas sem variação possível não têm o que testar: na Lotofácil (15 de 25) sempre sai
+    # pelo menos um par consecutivo, então a menor distância é sempre 1.
+    results = [
+        pmf_test(observed, pmf, name)
+        for observed, pmf, name in per_contest
+        if (np.asarray(pmf) > 0).sum() > 1
     ]
 
     rng = np.random.default_rng(seed)

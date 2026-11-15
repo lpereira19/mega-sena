@@ -1,0 +1,8 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 100 dezenas,102.43314438146048,99,0.38648815477842074,corrigido 80/99
+Frequência das 100 dezenas (Monte Carlo),82.77425808602867,99,0.4012993503248376,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,7.242833105863436,12,0.8411576750425698,13 categorias
+Total de dezenas por quadrante,8.476400466822275,3,0.03712669547897098,corrigido 80/99
+"Frequência das 100 dezenas, 1999-2009",126.69170010030089,99,0.03172768864760776,pós-hoc; 997 concursos
+"Frequência das 100 dezenas, 2010-2017",89.21927710843374,99,0.7490778954759241,pós-hoc; 830 concursos
+"Frequência das 100 dezenas, 2018-2026",105.70488481228668,99,0.30387644194460206,pós-hoc; 1172 concursos

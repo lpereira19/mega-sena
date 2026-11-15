@@ -1,0 +1,8 @@
+teste,estatistica,graus_liberdade,p_valor,observacao
+Frequência das 80 dezenas,101.50256267150365,79,0.044963727389129675,corrigido 75/79
+Frequência das 80 dezenas (Monte Carlo),96.36319240965537,79,0.04847576211894053,estatística sem correção; 2000 simulações
+Pares por concurso vs. hipergeométrica,4.017930895444476,5,0.5468372382786587,6 categorias
+Total de dezenas por quadrante,5.661133900748802,3,0.12931245404102945,corrigido 75/79
+"Frequência das 80 dezenas, 1994-2005",81.73430051813472,79,0.3943545690821508,pós-hoc; 1544 concursos
+"Frequência das 80 dezenas, 2006-2015",83.59494442157266,79,0.3403473987164099,pós-hoc; 2429 concursos
+"Frequência das 80 dezenas, 2016-2026",99.88924232936756,79,0.05631290928269627,pós-hoc; 3194 concursos

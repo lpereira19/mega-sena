@@ -10,6 +10,8 @@ Em todos os gráficos, a referência teórica (o que se espera de um sorteio uni
 cinza, para o desvio observado ficar visível.
 """
 
+from collections.abc import Callable
+
 from loguru import logger
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
@@ -20,7 +22,7 @@ import seaborn as sns
 import typer
 
 from mega_sena import distances
-from mega_sena.dataset import load_processed
+from mega_sena.dataset import MONTHS, load_processed
 from mega_sena.features import (
     QUADRANT_COLUMNS,
     build_features,
@@ -31,7 +33,7 @@ from mega_sena.features import (
     quadrant_sizes,
 )
 from mega_sena.games import MEGA_SENA, GameSpec, get_game
-from mega_sena.hypothesis import hypergeom_pmf
+from mega_sena.hypothesis import extra_values, hypergeom_pmf
 from mega_sena.modeling.backtest import expected_hits, hits_pmf
 
 app = typer.Typer()
@@ -44,6 +46,14 @@ TEXT, TEXT_SECONDARY, SURFACE = "#0b0b0b", "#52514e", "#fcfcfb"
 SEQUENTIAL = LinearSegmentedColormap.from_list(
     "blues", ["#cde2fb", "#86b6ef", "#3987e5", "#1c5cab", "#0d366b"]
 )
+
+
+def _percent(value: float, _position=None) -> str:
+    """Rótulo de eixo em porcentagem, com uma casa decimal só quando a marca precisa (12,5%)."""
+    return f"{value * 100:.1f}".removesuffix(".0") + "%"
+
+
+PERCENT = plt.FuncFormatter(_percent)
 
 
 def _p_number(spec: GameSpec) -> float:
@@ -256,14 +266,52 @@ def _observed_vs_expected_bars(
                 color=TEXT_SECONDARY,
             )
     ax.set_xticks(x, labels)
-    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ax.yaxis.set_major_formatter(PERCENT)
     ax.legend(loc="upper right")
 
 
-def _with_tail(values: np.ndarray, cap: int) -> np.ndarray:
-    """Mantém as ``cap`` primeiras categorias e soma o resto numa última ("cap+")."""
-    values = np.asarray(values, dtype=float)
-    return np.append(values[:cap], values[cap:].sum())
+def _tail_binned(
+    observed: np.ndarray,
+    pmf: np.ndarray,
+    start: int,
+    label: Callable[[int, str], str] = lambda v, plus: f"{v}{plus}",
+    tail: float = 0.01,
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Agrupa as caudas raras de uma distribuição discreta para o gráfico de barras.
+
+    Os valores são ``start, start + 1, ...``. A cauda de cima começa no primeiro valor ``v``
+    com P(X >= v) < ``tail`` e vira a categoria "v+"; a de baixo junta os valores com
+    P(X <= v) < ``tail`` em "≤v". Assim as categorias se ajustam a cada jogo (na Mega-Sena,
+    "3+" pares consecutivos; na Lotofácil, em torno de 8).
+
+    Args:
+        observed: Proporção observada de cada valor (mesmo tamanho de ``pmf``).
+        pmf: Probabilidade teórica de cada valor.
+        start: Valor da primeira posição.
+        label: Rótulo de um valor; recebe o valor e ``"+"`` na categoria da cauda de cima.
+        tail: Probabilidade máxima de cada cauda agrupada.
+
+    Returns:
+        Observado e esperado já agrupados, e os rótulos das categorias.
+    """
+    pmf = np.asarray(pmf, dtype=float)
+    observed = np.asarray(observed, dtype=float)
+    upper = np.flatnonzero(np.cumsum(pmf[::-1])[::-1] < tail)
+    hi = int(upper[0]) if len(upper) else len(pmf) - 1
+    lower = np.flatnonzero(np.cumsum(pmf) < tail)
+    lo = int(lower[-1]) if len(lower) else -1
+
+    def group(values: np.ndarray) -> np.ndarray:
+        head = [values[: lo + 1].sum()] if lo >= 0 else []
+        return np.array([*head, *values[lo + 1 : hi], values[hi:].sum()])
+
+    labels = [
+        *([label(start, "")] if lo == 0 else []),  # cauda de baixo com um valor só
+        *([f"≤{label(start + lo, '')}"] if lo > 0 else []),
+        *(label(start + i, "") for i in range(lo + 1, hi)),
+        label(start + hi, "+" if hi < len(pmf) - 1 else ""),
+    ]
+    return group(observed), group(pmf), labels
 
 
 def plot_even_odd(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
@@ -304,7 +352,12 @@ def plot_quadrants(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     split_row, split_col = rows // 2, cols // 2
     k_max = spec.sorteadas
     freq = number_frequencies(draws_matrix(df), spec)
-    grid = freq.to_numpy().reshape(rows, cols)
+    # A grade pode ter a última linha incompleta (Dia de Sorte): as células sobrando ficam vazias.
+    grid = np.full(rows * cols, np.nan)
+    grid[: spec.n] = freq.to_numpy()
+    grid = grid.reshape(rows, cols)
+    labels = np.full(rows * cols, "", dtype=object)
+    labels[: spec.n] = [f"{number:02d}" for number in spec.numbers]
     features = build_features(df, spec)
     sizes = quadrant_sizes(spec)
 
@@ -318,8 +371,8 @@ def plot_quadrants(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
         linewidths=2,
         linecolor=SURFACE,
         square=True,
-        annot=spec.numbers.reshape(grid.shape),
-        fmt="02d",
+        annot=labels.reshape(grid.shape),
+        fmt="",
         annot_kws={"fontsize": 9},
         cbar_kws={"label": "Vezes sorteada", "shrink": 0.8},
         xticklabels=False,
@@ -367,7 +420,7 @@ def plot_quadrants(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
         if len(set(sizes)) > 1:  # quadrantes de tamanhos diferentes: um esperado para cada
             ax_dist.plot(k, hypergeom_pmf(sizes[i], spec), color=SERIES[i], lw=1, ls="--")
     ax_dist.set_xticks(k)
-    ax_dist.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ax_dist.yaxis.set_major_formatter(PERCENT)
     ax_dist.set_xlabel("Dezenas sorteadas no quadrante")
     ax_dist.set_ylabel("Proporção dos concursos")
     ax_dist.set_title("Dezenas por quadrante em cada concurso")
@@ -441,7 +494,7 @@ def plot_backtest(
             linewidth=1,
         )
     ax_dist.set_xticks(x, labels)
-    ax_dist.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ax_dist.yaxis.set_major_formatter(PERCENT)
     ax_dist.set_xlabel("Acertos por concurso")
     ax_dist.set_ylabel("Proporção das apostas")
     ax_dist.set_title("Distribuição de acertos por estratégia")
@@ -488,42 +541,36 @@ def plot_distances(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     ax_pairs, ax_runs, ax_min, ax_gaps = axes.ravel()
     reference = "esperado (acaso)"
 
-    pairs = np.bincount(distances.consecutive_pairs(draws), minlength=k) / n
+    pairs_pmf = distances.consecutive_pairs_pmf(spec)
+    pairs = np.bincount(distances.consecutive_pairs(draws), minlength=len(pairs_pmf)) / n
     _observed_vs_expected_bars(
-        ax_pairs,
-        _with_tail(pairs, 3),
-        _with_tail(distances.consecutive_pairs_pmf(spec), 3),
-        ["0", "1", "2", "3+"],
-        reference,
-        annotate=True,
+        ax_pairs, *_tail_binned(pairs, pairs_pmf, start=0), reference, annotate=True
     )
     ax_pairs.set_xlabel("Pares de dezenas consecutivas no concurso (ex.: 22 e 23)")
     ax_pairs.set_ylabel("Proporção dos concursos")
     ax_pairs.set_title("Quantos pares consecutivos saem por concurso")
 
     runs = np.bincount(distances.longest_run(draws), minlength=k + 1)[1:] / n
-    _observed_vs_expected_bars(
-        ax_runs,
-        _with_tail(runs, 3),
-        _with_tail(distances.longest_run_pmf(spec), 3),
-        ["nenhuma", "2 seguidas", "3 seguidas", "4+ seguidas"],
-        reference,
-        annotate=True,
+    runs_pmf = distances.longest_run_pmf(spec)
+    runs_binned = _tail_binned(
+        runs,
+        runs_pmf,
+        start=1,
+        label=lambda v, plus: "nenhuma" if v == 1 and not plus else f"{v}{plus} seguidas",
     )
-    ax_runs.set_xlabel("Maior sequência de consecutivas no concurso")
+    runs_xlabel = "Maior sequência de consecutivas no concurso"
+    if len(runs_binned[2]) > 6:  # muitas categorias (Lotofácil): rótulos curtos
+        runs_binned = _tail_binned(runs, runs_pmf, start=1)
+        runs_xlabel += " (1 = nenhuma)"
+    _observed_vs_expected_bars(ax_runs, *runs_binned, reference, annotate=True)
+    ax_runs.set_xlabel(runs_xlabel)
     ax_runs.set_ylabel("Proporção dos concursos")
     ax_runs.set_title("Maior sequência de dezenas seguidas")
 
-    cap = 7
     min_pmf = distances.min_gap_pmf(spec)
     smallest = np.bincount(distances.min_gap(draws), minlength=len(min_pmf) + 1)[1:] / n
     _observed_vs_expected_bars(
-        ax_min,
-        _with_tail(smallest, cap),
-        _with_tail(min_pmf, cap),
-        [*map(str, range(1, cap + 1)), f"{cap + 1}+"],
-        reference,
-        annotate=True,
+        ax_min, *_tail_binned(smallest, min_pmf, start=1), reference, annotate=True
     )
     ax_min.set_xlabel("Menor distância entre duas dezenas do concurso")
     ax_min.set_ylabel("Proporção dos concursos")
@@ -533,14 +580,14 @@ def plot_distances(df: pd.DataFrame, spec: GameSpec = MEGA_SENA) -> Figure:
     gaps = np.minimum(distances.sorted_gaps(draws), gap_cap).ravel()
     observed = np.bincount(gaps, minlength=gap_cap + 1)[1:] / gaps.size
     x = np.arange(1, gap_cap + 1)
-    ticks = [1, *range(5, gap_cap, 5), gap_cap]
+    ticks = list(range(1, gap_cap + 1)) if gap_cap <= 10 else [1, *range(5, gap_cap, 5), gap_cap]
     ax_gaps.bar(x, observed, color=SERIES[0], width=0.8, edgecolor=SURFACE, label="observado")
     ax_gaps.plot(
         x, distances.gap_pmf(spec), color=TEXT_SECONDARY, lw=2, marker="o", ms=4, label=reference
     )
     ax_gaps.set_xticks(ticks)
     ax_gaps.set_xticklabels([*map(str, ticks[:-1]), f"{gap_cap}+"])
-    ax_gaps.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ax_gaps.yaxis.set_major_formatter(PERCENT)
     ax_gaps.set_xlabel("Salto entre duas dezenas vizinhas (ordem crescente)")
     ax_gaps.set_ylabel("Proporção dos saltos")
     ax_gaps.set_title("Saltos entre dezenas vizinhas")
@@ -684,6 +731,69 @@ def plot_neighbor_offsets(df: pd.DataFrame, number: int, spec: GameSpec = MEGA_S
     return fig
 
 
+def plot_extra(df: pd.DataFrame, spec: GameSpec) -> Figure:
+    """Frequência de cada opção do sorteio extra (Mês da Sorte, Time do Coração).
+
+    A faixa cinza é o intervalo de 95% da Binomial(n_concursos, 1/opções). Meses aparecem em
+    ordem de calendário; times, do mais ao menos sorteado. Só entram os concursos com a lista de
+    opções fixa (ver :attr:`GameSpec.extra_ate`).
+    """
+    counts = extra_values(df, spec).value_counts()
+    n = int(counts.sum())
+    p = 1 / spec.extra_total
+    expected = n * p
+    half_band = 1.96 * np.sqrt(n * p * (1 - p))
+    outside = (counts - expected).abs() > half_band
+    title = f"{spec.extra_nome}: frequência de cada opção em {n} concursos"
+    if spec.extra_ate is not None:
+        title += f" (1 a {spec.extra_ate}, lista fixa de {spec.extra_total})"
+    legend = [
+        plt.Rectangle((0, 0), 1, 1, color=SERIES[1]),
+        plt.Rectangle((0, 0), 1, 1, color=SERIES[0]),
+    ]
+    labels = ["fora da faixa de 95%", "dentro da faixa"]
+
+    if spec.extra == "mes_da_sorte":
+        counts = counts.reindex(MONTHS, fill_value=0)
+        outside = outside.reindex(MONTHS, fill_value=True)
+        colors = [SERIES[1] if out else SERIES[0] for out in outside]
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.axhspan(expected - half_band, expected + half_band, color=REFERENCE, alpha=0.15, lw=0)
+        ax.bar([month[:3] for month in counts.index], counts.values, color=colors, width=0.75)
+        ax.axhline(expected, color=REFERENCE, lw=1.5, ls="--")
+        for i, value in enumerate(counts.values):
+            ax.annotate(
+                str(value),
+                (i, value),
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                xytext=(0, 2),
+                textcoords="offset points",
+                color=TEXT_SECONDARY,
+            )
+        ax.set_ylim(0, counts.max() * 1.3)  # folga para a legenda
+        ax.set_ylabel("Vezes sorteado")
+        legend_loc, legend_cols = "upper center", 3
+    else:
+        counts = counts.sort_values()
+        colors = [SERIES[1] if outside[name] else SERIES[0] for name in counts.index]
+        fig, ax = plt.subplots(figsize=(10, max(6, 0.2 * len(counts))))
+        ax.axvspan(expected - half_band, expected + half_band, color=REFERENCE, alpha=0.15, lw=0)
+        ax.barh(counts.index, counts.values, color=colors, height=0.75)
+        ax.axvline(expected, color=REFERENCE, lw=1.5, ls="--")
+        ax.tick_params(axis="y", labelsize=7)
+        ax.set_ylim(-0.6, len(counts) - 0.4)
+        ax.set_xlabel("Vezes sorteado")
+        ax.set_xlim(0, counts.max() * 1.08)
+        legend_loc, legend_cols = "lower right", 1  # as barras mais curtas ficam embaixo
+    legend.append(plt.Line2D([], [], color=REFERENCE, lw=1.5, ls="--"))
+    labels.append(f"esperado: {expected:.0f}")
+    ax.legend(handles=legend, labels=labels, loc=legend_loc, ncols=legend_cols)
+    ax.set_title(title)
+    return fig
+
+
 def run(spec: GameSpec) -> list[str]:
     """Gera e salva todas as figuras de um jogo.
 
@@ -705,6 +815,8 @@ def run(spec: GameSpec) -> list[str]:
         "distancias.png": plot_distances(df, spec),
         "vizinhanca.png": plot_neighborhood(df, spec),
     }
+    if spec.extra:
+        figures[f"{spec.extra}.png"] = plot_extra(df, spec)
     if paths.backtest_summary.exists():
         figures["backtest.png"] = plot_backtest(
             pd.read_csv(paths.backtest_hits),
