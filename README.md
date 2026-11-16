@@ -16,6 +16,9 @@ dados com rigor estatístico:
 4. **Experimentação**: backtest walk-forward que mostra que estratégias de "números quentes"
    ou "números atrasados" performam igual a um gerador pseudoaleatório.
 
+A mesma análise roda também para Lotofácil, Quina, Lotomania, Timemania, Dia de Sorte, Dupla
+Sena e +Milionária, resumidas na [comparação entre as loterias](#comparação-entre-as-loterias).
+
 > 📓 **Análise completa, passo a passo:**
 > [`notebooks/1.0-lsp-analise-mega-sena.ipynb`](notebooks/1.0-lsp-analise-mega-sena.ipynb)
 
@@ -98,6 +101,35 @@ Quão próximas saem as dezenas de um mesmo concurso? Números "colados", sequê
 A lição: um teste estatisticamente significativo não implica um efeito explorável. O tamanho do efeito importa tanto quanto o p-valor.
 
 <!-- RESULTADOS:FIM -->
+
+## Comparação entre as loterias
+
+As mesmas análises rodam para outras sete loterias da Caixa, cada uma com o volante, o número
+de dezenas e os sorteios extras dela. A tabela reúne os p-valores de cada jogo; a pergunta é a
+mesma em todas as colunas: o sorteio se comporta como aleatório?
+
+<!-- COMPARACAO:INICIO (gerado por mega_sena.report; não edite à mão) -->
+
+| Jogo | Regra | Concursos | Frequência | Pares/ímpares | Quadrantes | Distâncias¹ | Teste próprio² | Estratégias³ |
+|---|---|---|---|---|---|---|---|---|
+| Mega-Sena | 6 de 60 | 3.085 (desde 1996) | **0,005** | 0,186 | 0,180 | 0,243 | – | 0,116 |
+| Lotofácil | 15 de 25 | 3.829 (desde 2003) | **< 0,001** | 0,895 | 0,056 | 0,127 | – | 0,070 |
+| Quina | 5 de 80 | 7.167 (desde 1994) | **0,045** | 0,547 | 0,129 | 0,249 | – | 1,000 |
+| Lotomania | 20 de 100, aposta 50 | 2.999 (desde 1999) | 0,386 | 0,841 | **0,037** | 0,174 | – | 1,000 |
+| Timemania | 7 de 80, aposta 10 + Time do Coração | 2.467 (desde 2008) | 0,521 | 0,862 | 0,644 | 0,236 | 0,813 | 1,000 |
+| Dia de Sorte | 7 de 31 + Mês da Sorte | 1.347 (desde 2018) | 0,333 | 0,750 | 0,813 | 0,891 | 0,579 | 0,312 |
+| Dupla Sena | 6 de 50, 2 sorteios | 3.032 (desde 2001) | 0,284 | 0,567 | 0,755 | 1,000 | 0,391 | 0,192 |
+| +Milionária | 6 de 50 + 2 de 6 trevos | 407 (desde 2022) | 0,102 | 0,173 | 0,399 | 0,098 | 0,902 / 0,955 | 0,192 |
+
+¹ Menor p-valor entre os testes de distância do jogo, já corrigido por Bonferroni dentro do jogo. ² Mês da Sorte (Dia de Sorte), Time do Coração (Timemania, só até o concurso 1781, enquanto a lista de clubes foi fixa), trevos por trevo e por combinação (+Milionária) e dezenas em comum entre os dois sorteios (Dupla Sena). ³ Menor p-valor entre as estratégias do backtest, corrigido por Bonferroni. Em negrito, p < 0,05.
+
+Ao todo são **108 testes** nos 8 jogos (sem contar os recortes por período, que são exploratórios). Se todos os sorteios fossem perfeitamente aleatórios, cerca de 5 dariam p < 0,05 só por acaso; deram **16**. Parte do excesso é o mesmo achado contado mais de uma vez: 3 deles são estratégias do backtest de jogos cuja frequência já deu significativa, e essas estratégias escolhem as dezenas justamente pela frequência. Olhados juntos, os 108 p-valores são compatíveis com a distribuição uniforme esperada sob H0 (Kolmogorov-Smirnov, p = 0,126; aproximado, porque testes do mesmo jogo usam os mesmos sorteios).
+
+Com a correção de Bonferroni para os 108 testes (p < 0,0005), sobrevive só o teste de frequência das 25 dezenas da Lotofácil (p < 0,001). Mesmo assim, nenhuma estratégia de aposta da Lotofácil vence o acaso no backtest (menor p com Bonferroni: 0,070): o desvio é estatisticamente detectável, mas pequeno demais para ser explorado. Já o desvio de frequência da Mega-Sena (p = 0,005), destaque da seção anterior, não passa nessa régua: olhando 8 loterias, um p desse tamanho em algum lugar é esperado.
+
+As figuras e tabelas de cada jogo ficam em `reports/figures/<jogo>` e `reports/<jogo>`.
+
+<!-- COMPARACAO:FIM -->
 
 ## Metodologia
 
@@ -221,10 +253,10 @@ uv run pytest                             # testes
 
 Todos os comandos aceitam `--jogo <slug>` (padrão: `megasena`): `megasena`, `lotofacil`,
 `quina`, `lotomania`, `timemania`, `diadesorte`, `duplasena` e `maismilionaria`; o pipeline
-aceita também `--jogo todos`. As
-regras de cada loteria ficam em [`games.py`](mega_sena/games.py). Por enquanto a seção de
-resultados acima e o notebook cobrem só a Mega-Sena; os demais jogos geram as mesmas tabelas e
-figuras nas pastas de cada um. Com `make` disponível (Linux/macOS/WSL), `make all` faz o
+aceita também `--jogo todos`. As regras de cada loteria ficam em
+[`games.py`](mega_sena/games.py). A seção de resultados e o notebook detalham a Mega-Sena; os
+demais jogos geram as mesmas tabelas e figuras nas pastas de cada um, e a comparação entre as
+loterias é reescrita a cada execução com os jogos que já têm resultados. Com `make` disponível (Linux/macOS/WSL), `make all` faz o
 mesmo que o pipeline. Todos os passos usam semente fixa (`RANDOM_SEED` em
 [`config.py`](mega_sena/config.py)) e são reprodutíveis.
 

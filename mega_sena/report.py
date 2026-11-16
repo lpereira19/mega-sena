@@ -10,22 +10,25 @@ Uso::
     python -m mega_sena.report   # reescreve a seção de resultados do README
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 import re
 
 from loguru import logger
 import pandas as pd
+from scipy.stats import kstest
 import typer
 
 from mega_sena import distances
 from mega_sena.config import PROJ_ROOT
 from mega_sena.dataset import load_processed
 from mega_sena.features import draws_matrix, number_frequencies
-from mega_sena.games import MEGA_SENA
+from mega_sena.games import GAMES, MEGA_SENA, TIMEMANIA, GameSpec
 from mega_sena.hypothesis import (
     EVEN_ODD_TEST,
     FREQUENCY_MC_TEST,
     FREQUENCY_TEST,
+    OVERLAP_TEST,
     QUADRANT_TEST,
     format_test_name,
 )
@@ -36,6 +39,8 @@ app = typer.Typer()
 README_FILE = PROJ_ROOT / "README.md"
 START_MARKER = "<!-- RESULTADOS:INICIO (gerado por mega_sena.report; não edite à mão) -->"
 END_MARKER = "<!-- RESULTADOS:FIM -->"
+COMPARISON_START = "<!-- COMPARACAO:INICIO (gerado por mega_sena.report; não edite à mão) -->"
+COMPARISON_END = "<!-- COMPARACAO:FIM -->"
 ALPHA = 0.05
 HOT_STRATEGY = "quentes (histórico)"
 
@@ -392,24 +397,256 @@ A lição: um teste estatisticamente significativo não implica um efeito explor
 do efeito importa tanto quanto o p-valor."""
 
 
-def update_readme(text: str, path: Path = README_FILE) -> None:
-    """Substitui o trecho entre os marcadores do README por ``text``.
+# ---------------------------------------------------------------------------------------------
+# Comparação entre as loterias
+# ---------------------------------------------------------------------------------------------
+
+
+@dataclass
+class GameResults:
+    """Resultados salvos de um jogo, lidos dos arquivos do pipeline."""
+
+    spec: GameSpec
+    df: pd.DataFrame
+    tests: pd.DataFrame
+    distance_tests: pd.DataFrame
+    summary: pd.DataFrame
+
+
+def load_game_results(spec: GameSpec) -> GameResults | None:
+    """Lê os resultados de um jogo, ou ``None`` se o pipeline ainda não rodou para ele."""
+    paths = spec.paths
+    files = [paths.processed, paths.hypothesis_tests, paths.distance_tests, paths.backtest_summary]
+    if not all(f.exists() for f in files):
+        return None
+    return GameResults(
+        spec,
+        load_processed(spec),
+        pd.read_csv(paths.hypothesis_tests),
+        pd.read_csv(paths.distance_tests),
+        pd.read_csv(paths.backtest_summary),
+    )
+
+
+def game_rule(spec: GameSpec) -> str:
+    """Regra do jogo em poucas palavras: ``"6 de 60"``, ``"20 de 100, aposta 50"``..."""
+    rule = f"{spec.sorteadas} de {spec.n}"
+    if spec.aposta != spec.sorteadas:
+        rule += f", aposta {spec.aposta}"
+    if spec.sorteios_por_concurso > 1:
+        rule += f", {spec.sorteios_por_concurso} sorteios"
+    if spec.extra_sorteadas > 1:
+        rule += f" + {spec.extra_sorteadas} de {spec.extra_total} {spec.extra_nome.lower()}"
+    elif spec.extra:
+        rule += f" + {spec.extra_nome}"
+    return rule
+
+
+def _own_tests(results: GameResults) -> pd.DataFrame:
+    """Testes que só existem em alguns jogos: sorteio extra e os dois sorteios da Dupla Sena."""
+    names = results.tests["teste"]
+    spec = results.spec
+    own = names.eq(OVERLAP_TEST)
+    if spec.extra:
+        own |= names.str.startswith(f"{spec.extra_nome}:")
+    return results.tests[own]
+
+
+def _is_exploratory(tests: pd.DataFrame, spec: GameSpec) -> pd.Series:
+    """Linhas que não entram na contagem de testes: recortes por período e a versão Monte Carlo
+    do teste de frequência (repete a pergunta do teste corrigido)."""
+    return tests["observacao"].fillna("").str.startswith("pós-hoc") | tests["teste"].eq(
+        format_test_name(FREQUENCY_MC_TEST, spec)
+    )
+
+
+def confirmatory_p_values(results: list[GameResults]) -> pd.DataFrame:
+    """Todos os testes confirmatórios de todos os jogos, com o p-valor sem correção.
+
+    Entram os testes de hipótese (menos os exploratórios), os de distância e o p-valor de
+    Monte Carlo de cada estratégia do backtest.
+    """
+    frames = []
+    for r in results:
+        tests = r.tests[~_is_exploratory(r.tests, r.spec)]
+        backtest = pd.DataFrame(
+            {
+                "teste": "Backtest: " + r.summary["estrategia"],
+                "p_valor": r.summary["p_valor_monte_carlo"],
+            }
+        )
+        for part in [
+            tests[["teste", "p_valor"]],
+            r.distance_tests[["teste", "p_valor"]],
+            backtest,
+        ]:
+            frames.append(part.assign(jogo=r.spec.nome))
+    return pd.concat(frames, ignore_index=True).dropna(subset=["p_valor"])
+
+
+def _cell(p: float) -> str:
+    """P-valor de célula de tabela, em negrito quando abaixo de 0,05."""
+    return f"**{fmt_p(p)}**" if p < ALPHA else fmt_p(p)
+
+
+def comparison_table(results: list[GameResults]) -> str:
+    """Uma linha por jogo com os p-valores dos testes comuns a todos."""
+    lines = [
+        (
+            "| Jogo | Regra | Concursos | Frequência | Pares/ímpares | Quadrantes "
+            "| Distâncias¹ | Teste próprio² | Estratégias³ |"
+        ),
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in results:
+        spec = r.spec
+        own = _own_tests(r)
+        own_cell = " / ".join(_cell(p) for p in own["p_valor"]) if len(own) else "–"
+        lines.append(
+            f"| {spec.nome} | {game_rule(spec)} "
+            f"| {fmt_int(r.df['concurso'].nunique())} (desde {r.df['data'].min():%Y}) "
+            f"| {_cell(_p_value(r.tests, format_test_name(FREQUENCY_TEST, spec)))} "
+            f"| {_cell(_p_value(r.tests, EVEN_ODD_TEST))} "
+            f"| {_cell(_p_value(r.tests, QUADRANT_TEST))} "
+            f"| {_cell(r.distance_tests['p_valor_bonferroni'].min())} "
+            f"| {own_cell} "
+            f"| {_cell(r.summary['p_valor_mc_bonferroni'].min())} |"
+        )
+    return "\n".join(lines)
+
+
+def comparison_reading(results: list[GameResults]) -> str:
+    """Leitura da tabela levando em conta quantos testes foram feitos ao todo."""
+    p_values = confirmatory_p_values(results)
+    total = len(p_values)
+    significant = p_values[p_values["p_valor"] < ALPHA]
+    threshold = ALPHA / total
+    survivors = p_values[p_values["p_valor"] < threshold].sort_values("p_valor")
+    uniformity = kstest(p_values["p_valor"], "uniform").pvalue
+
+    # Estratégias de backtest que dão significativas num jogo cuja frequência já deu: as
+    # "quentes" e "frias" são escolhidas pela frequência, então repetem o mesmo achado.
+    biased_games = {
+        r.spec.nome
+        for r in results
+        if _p_value(r.tests, format_test_name(FREQUENCY_TEST, r.spec)) < ALPHA
+    }
+    echoes = significant["teste"].str.startswith("Backtest:") & significant["jogo"].isin(
+        biased_games
+    )
+
+    text = (
+        f"Ao todo são **{total} testes** nos {len(results)} jogos (sem contar os recortes por "
+        f"período, que são exploratórios). Se todos os sorteios fossem perfeitamente "
+        f"aleatórios, cerca de {fmt_num(ALPHA * total, 0)} dariam p < 0,05 só por acaso; deram "
+        f"**{len(significant)}**."
+    )
+    if echoes.any():
+        text += (
+            " Parte do excesso é o mesmo achado contado mais de uma vez: "
+            + (
+                f"{int(echoes.sum())} deles são estratégias"
+                if echoes.sum() > 1
+                else "um deles é uma estratégia"
+            )
+            + " do backtest de jogos cuja frequência já deu significativa, e essas estratégias "
+            "escolhem as dezenas justamente pela frequência."
+        )
+    text += (
+        f" Olhados juntos, os {total} p-valores são "
+        f"{'compatíveis' if uniformity >= ALPHA else 'incompatíveis'} com a distribuição "
+        f"uniforme esperada sob H0 (Kolmogorov-Smirnov, {p_eq(uniformity)}; aproximado, porque "
+        f"testes do mesmo jogo usam os mesmos sorteios)."
+    )
+    if survivors.empty:
+        return (
+            f"{text}\n\nCom a correção de Bonferroni para os {total} testes (p < "
+            f"{fmt_num(threshold, 4)}), **nenhum resultado sobrevive**: o conjunto é compatível "
+            f"com sorteios aleatórios em todas as loterias."
+        )
+
+    found = _join(
+        [
+            f"o teste de {row.teste[0].lower()}{row.teste[1:]} da {row.jogo} ({p_eq(row.p_valor)})"
+            for row in survivors.itertuples()
+        ]
+    )
+    plural = len(survivors) > 1
+    text += (
+        f"\n\nCom a correção de Bonferroni para os {total} testes (p < {fmt_num(threshold, 4)}), "
+        f"{'sobrevivem' if plural else 'sobrevive'} só {found}."
+    )
+    by_name = {r.spec.nome: r for r in results}
+    for jogo in survivors["jogo"].unique():
+        best = by_name[jogo].summary["p_valor_mc_bonferroni"].min()
+        if best >= ALPHA:
+            text += (
+                f" Mesmo assim, nenhuma estratégia de aposta da {jogo} vence o acaso no backtest "
+                f"(menor p com Bonferroni: {fmt_p(best)}): o desvio é estatisticamente "
+                f"detectável, mas pequeno demais para ser explorado."
+            )
+    mega = by_name.get(MEGA_SENA.nome)
+    if mega is not None:
+        p_mega = _p_value(mega.tests, FREQ_TEST)
+        if p_mega < ALPHA and p_mega >= threshold:
+            text += (
+                f" Já o desvio de frequência da Mega-Sena ({p_eq(p_mega)}), destaque da seção "
+                f"anterior, não passa nessa régua: olhando {len(results)} loterias, um p desse "
+                f"tamanho em algum lugar é esperado."
+            )
+    return text
+
+
+def render_comparison(results: list[GameResults]) -> str:
+    """Monta a seção de comparação entre as loterias (sem os marcadores)."""
+    return f"""\
+{comparison_table(results)}
+
+¹ Menor p-valor entre os testes de distância do jogo, já corrigido por Bonferroni dentro do \
+jogo. ² Mês da Sorte (Dia de Sorte), Time do Coração (Timemania, só até o concurso \
+{TIMEMANIA.extra_ate}, enquanto a lista de clubes foi fixa), trevos por trevo e por combinação \
+(+Milionária) e dezenas em comum entre os dois sorteios (Dupla Sena). ³ Menor p-valor entre as \
+estratégias do backtest, corrigido por Bonferroni. Em negrito, p < 0,05.
+
+{comparison_reading(results)}
+
+As figuras e tabelas de cada jogo ficam em `reports/figures/<jogo>` e `reports/<jogo>`."""
+
+
+def update_readme(
+    text: str,
+    path: Path = README_FILE,
+    start: str = START_MARKER,
+    end: str = END_MARKER,
+) -> None:
+    """Substitui o trecho entre os marcadores ``start`` e ``end`` do README por ``text``.
 
     Raises:
         ValueError: Se os marcadores não estiverem no README.
     """
     readme = path.read_text(encoding="utf-8")
-    pattern = re.compile(re.escape(START_MARKER) + r".*?" + re.escape(END_MARKER), re.DOTALL)
+    pattern = re.compile(re.escape(start) + r".*?" + re.escape(end), re.DOTALL)
     if not pattern.search(readme):
-        raise ValueError(f"Marcadores de resultados não encontrados em {path}.")
-    block = f"{START_MARKER}\n\n{text}\n\n{END_MARKER}"
+        raise ValueError(f"Marcadores {start!r} não encontrados em {path}.")
+    block = f"{start}\n\n{text}\n\n{end}"
     path.write_text(pattern.sub(lambda _: block, readme), encoding="utf-8")
+
+
+def run_comparison(readme_path: Path = README_FILE) -> None:
+    """Reescreve a comparação entre as loterias com os jogos que já têm resultados."""
+    results = [r for spec in GAMES.values() if (r := load_game_results(spec)) is not None]
+    if not results:
+        logger.warning("Nenhum jogo com resultados; comparação não atualizada.")
+        return
+    update_readme(render_comparison(results), readme_path, COMPARISON_START, COMPARISON_END)
+    logger.success(f"Comparação entre {len(results)} loterias atualizada ({readme_path}).")
 
 
 @app.command()
 def main():
-    """Reescreve a seção de resultados do README a partir dos arquivos de resultados."""
+    """Reescreve as seções geradas do README a partir dos arquivos de resultados."""
     run()
+    run_comparison()
 
 
 def run(readme_path: Path = README_FILE) -> None:

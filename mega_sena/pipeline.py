@@ -88,6 +88,7 @@ def run(
             logger.info("Reexecutando o notebook...")
             execute_notebook()
             logger.info(f"Notebook atualizado: {NOTEBOOK_FILE}")
+    report.run_comparison()
 
     logger.success(f"{spec.nome}: projeto atualizado até o concurso {after}.")
     return after
